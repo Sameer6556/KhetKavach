@@ -1,0 +1,18 @@
+# One-click Render deployment (Dashboard -> New -> Blueprint -> pick this repo).
+services:
+  - type: web
+    name: khetkavach
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DATA_GOV_IN_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: KK_MODEL
+        value: claude-opus-5-5
+      - key: KK_EFFORT
+        value: medium
