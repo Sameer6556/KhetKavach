@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KhetKavach · Farm Climate Shield</title>
+  <meta name="description" content="Agentic climate-risk shield for Indian farms: live weather, soil, river, satellite and mandi data, reasoned by Claude in the farmer's language.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 4 8 13v17c0 15 10 26 24 30 14-4 24-15 24-30V13Z' fill='%231f7a4d'/%3E%3Cpath d='M32 46c-1-9 2-17 12-22-2 10-6 17-12 22Zm0 0c-6-4-10-10-11-18 7 3 11 9 11 18Z' fill='%23d8f3dc'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 4 8 13v17c0 15 10 26 24 30 14-4 24-15 24-30V13Z"/><path class="leaf" d="M32 46c-1-9 2-17 12-22-2 10-6 17-12 22Zm0 0c-6-4-10-10-11-18 7 3 11 9 11 18Z"/></svg>
+      <div>
+        <div class="brand-name">KhetKavach <span class="brand-hi">खेत कवच</span></div>
+        <div class="brand-tag" data-i18n="tagline">Climate-risk shield for every farm</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <label class="lang-picker">
+        <span class="sr-only" data-i18n="language">Language</span>
+        <select id="language" aria-label="Language"></select>
+      </label>
+      <span class="status-pill" id="ai-status" title="AI agent status"><span class="dot"></span><span class="label">AI</span></span>
+      <span class="status-pill" id="data-status" title="Live data sources"><span class="dot"></span><span class="label" data-i18n="live_data">Live data</span></span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="farm-panel" aria-label="Farm setup">
+      <h2 class="panel-title" data-i18n="your_farm">Your farm</h2>
+      <form id="search-form" class="search-row" autocomplete="off">
+        <input id="place-search" type="search" placeholder="Search village / town / district" data-i18n-placeholder="search_placeholder" aria-label="Search place">
+        <button type="submit" class="btn btn-ghost" aria-label="Search">🔍</button>
+      </form>
+      <ul id="search-results" class="search-results" hidden></ul>
+      <button id="locate-btn" type="button" class="btn btn-ghost btn-block" data-i18n="use_location">📍 Use my location</button>
+      <div id="map" class="map" role="application" aria-label="Map: click to place your farm"></div>
+      <p id="place-label" class="place-label" data-i18n="click_map">Tap the map to mark your field.</p>
+
+      <form id="farm-form" class="farm-form">
+        <label><span data-i18n="crop">Crop</span>
+          <select id="crop" required></select>
+        </label>
+        <label><span data-i18n="sowing_date">Sowing / transplanting date</span>
+          <input id="sowing-date" type="date" required>
+        </label>
+        <label><span data-i18n="irrigation">Irrigation</span>
+          <select id="irrigation">
+            <option value="drip" data-i18n="irr_drip">Drip</option>
+            <option value="sprinkler" data-i18n="irr_sprinkler">Sprinkler</option>
+            <option value="furrow" data-i18n="irr_furrow">Furrow</option>
+            <option value="flood" selected data-i18n="irr_flood">Flood / basin</option>
+            <option value="rainfed" data-i18n="irr_rainfed">Rainfed (no irrigation)</option>
+          </select>
+        </label>
+        <label><span data-i18n="last_irrigation">Last irrigated (optional)</span>
+          <input id="last-irrigation" type="date">
+        </label>
+        <button id="analyse-btn" type="submit" class="btn btn-primary btn-block" data-i18n="analyse">Analyse my farm</button>
+        <p id="form-error" class="form-error" role="alert" hidden></p>
+      </form>
+    </aside>
+
+    <section class="workspace">
+      <nav class="tabs" role="tablist">
+        <button role="tab" class="tab active" data-tab="dashboard" aria-selected="true" data-i18n="tab_dashboard">Risk dashboard</button>
+        <button role="tab" class="tab" data-tab="chat" aria-selected="false" data-i18n="tab_chat">Ask the AI agronomist</button>
+        <button role="tab" class="tab" data-tab="sentinel" aria-selected="false" data-i18n="tab_sentinel">Sentinel alerts</button>
+      </nav>
+
+      <div class="tab-panel" id="panel-dashboard" role="tabpanel">
+        <div id="dash-empty" class="empty-state">
+          <h3 data-i18n="empty_title">Mark your field and press “Analyse my farm”.</h3>
+          <p data-i18n="empty_body">KhetKavach pulls live forecasts, 30-year climate normals, soil maps, river flood models, satellite imagery, disaster alerts and mandi prices for your exact location, then turns them into actions.</p>
+        </div>
+        <div id="dash-summary" class="summary-banner" hidden></div>
+        <div id="dash-grid" class="card-grid" hidden></div>
+      </div>
+
+      <div class="tab-panel" id="panel-chat" role="tabpanel" hidden>
+        <div class="chat-layout">
+          <div class="chat-main">
+            <div id="chat-log" class="chat-log" aria-live="polite"></div>
+            <div id="suggestions" class="suggestions"></div>
+            <form id="chat-form" class="composer">
+              <button id="mic-btn" type="button" class="btn btn-icon" aria-label="Speak your question" title="Speak">🎙️</button>
+              <textarea id="chat-input" rows="1" maxlength="1500" placeholder="Ask about your farm…" data-i18n-placeholder="ask_placeholder" aria-label="Your question"></textarea>
+              <button id="send-btn" type="submit" class="btn btn-primary" data-i18n="send">Send</button>
+            </form>
+            <label class="autospeak"><input id="autospeak" type="checkbox"> <span data-i18n="read_aloud">Read answers aloud</span></label>
+          </div>
+          <aside class="trace" aria-label="Agent reasoning trace">
+            <div class="trace-head">
+              <h3 data-i18n="trace_title">Agent trace</h3>
+              <span class="trace-sub" data-i18n="trace_sub">live reasoning, tool calls &amp; verification</span>
+            </div>
+            <ol id="trace-list" class="trace-list"></ol>
+          </aside>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="panel-sentinel" role="tabpanel" hidden>
+        <div class="sentinel-layout">
+          <div class="sentinel-col">
+            <h3 data-i18n="sentinel_title">Kavach Sentinel</h3>
+            <p class="muted" data-i18n="sentinel_body">Registered farms are re-analysed automatically every few hours. New risks become alerts in the farmer's language, optionally sent to Telegram.</p>
+            <form id="register-form" class="register-form">
+              <label><span data-i18n="farm_name">Farm name</span><input id="farm-name" required maxlength="60" placeholder="e.g. Ramesh's onion field"></label>
+              <label><span data-i18n="telegram_id">Telegram chat ID (optional)</span><input id="telegram-id" inputmode="numeric" pattern="-?[0-9]+" maxlength="32" placeholder="123456789"></label>
+              <button class="btn btn-primary" type="submit" data-i18n="register">Register current farm</button>
+              <p id="register-msg" class="small" role="status"></p>
+              <p class="muted small" data-i18n="telegram_help">To get alerts on Telegram, start a chat with this server's bot, then get your chat ID from @userinfobot.</p>
+            </form>
+            <div class="row-between">
+              <h4 data-i18n="registered_farms">Registered farms</h4>
+              <button id="scan-all" class="btn btn-ghost" type="button" data-i18n="scan_all">Scan all now</button>
+            </div>
+            <ul id="farm-list" class="farm-list"></ul>
+          </div>
+          <div class="sentinel-col">
+            <h3 data-i18n="alerts_title">Alerts</h3>
+            <ul id="alert-list" class="alert-list"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span data-i18n="footer">Live sources: Open-Meteo (ECMWF/GFS/ICON, ERA5, GloFAS, CAMS) · ISRIC SoilGrids · Copernicus Sentinel-2 · GDACS · Agmarknet/data.gov.in · OpenStreetMap. Advisory only: confirm with your local KVK.</span>
+  </footer>
+
+  <template id="tpl-card">
+    <article class="card" data-level="unknown">
+      <header class="card-head">
+        <span class="card-icon" aria-hidden="true"></span>
+        <h3 class="card-title"></h3>
+        <span class="chip level-chip"></span>
+      </header>
+      <p class="card-headline"></p>
+      <div class="card-body"></div>
+      <footer class="card-foot"></footer>
+    </article>
+  </template>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>
