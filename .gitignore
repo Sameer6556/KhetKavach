@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Local runtime state (SQLite cache, farms, alerts)
+data/*.db
+data/*.db-*
+
+# Secrets
+.env
+
+# Node (only used to vendor frontend libraries)
+node_modules/
+package-lock.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
