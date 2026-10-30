@@ -131,7 +131,9 @@ async function pollHealth() {
     const h = await getJSON('/api/health');
     const ai = $('#ai-status');
     ai.className = `status-pill ${h.ai.enabled ? 'ok' : 'warn'}`;
-    ai.title = h.ai.enabled ? `AI agent: ${h.ai.model} (effort ${h.ai.effort})` : 'AI key not configured: rule-based advisor active';
+    ai.title = h.ai.enabled ? `AI agent: ${h.ai.provider} · ${h.ai.model}${h.ai.effort ? ` (effort ${h.ai.effort})` : ''}`
+      : 'No AI key configured: rule-based advisor active';
+    ai.querySelector('.label').textContent = h.ai.enabled ? `AI · ${h.ai.provider === 'gemini' ? 'Gemini' : 'Claude'}` : 'AI off';
     const sources = Object.values(h.data_sources || {});
     const bad = sources.filter((s) => s.status !== 'ok').length;
     const data = $('#data-status');

@@ -6,7 +6,7 @@ Problem tracks: *Multilingual Agritech & Resource Advisory Assistant* + *Predict
 KhetKavach gives an Indian smallholder a personal agronomist and climate-risk analyst for their **exact field**.
 It fuses **10 live public data services** (weather models, 30-year climate normals, river-flood ensembles, soil maps,
 Sentinel-2 satellite imagery, UN disaster alerts, government mandi prices) with **published agronomic science**
-(FAO-56, IMD criteria, Hutton late-blight rules). A **Claude agent** then plans, calls tools in parallel,
+(FAO-56, IMD criteria, Hutton late-blight rules). An **LLM agent (Google Gemini or Anthropic Claude)** then plans, calls tools in parallel,
 self-corrects, and answers **by voice in 11 Indian languages**. Every figure in its answer is **machine-verified
 against the live evidence** before the farmer sees it.
 
@@ -41,13 +41,13 @@ advise hundreds of farmers, and district disaster cells monitoring farms at risk
 | Capability | What the farmer gets |
 |---|---|
 | 🗺️ **Field-level risk dashboard** | Tap the field on a map. KhetKavach runs 12 live analyses concurrently and streams each card as it finishes: weather + IMD hazards, rain/heat vs 1991-2020 normal, crop stress and disease weather, an FAO-56 irrigation schedule, spray windows, a river-flood outlook, soil, mandi prices, disaster alerts, air quality and Sentinel-2 NDVI. |
-| 🤖 **AI agronomist (Claude agent)** | Ask in text or by voice. The agent plans, calls tools in parallel, recovers from tool errors using their hints, and answers in the farmer's language with `[E#]` citations to the evidence. |
+| 🤖 **AI agronomist (Gemini or Claude agent)** | Ask in text or by voice. The agent plans, calls tools in parallel, recovers from tool errors using their hints, and answers in the farmer's language with `[E#]` citations to the evidence. |
 | ✅ **Grounding verifier** | Before an answer is shown, every data figure (mm, °C, %, km/h, m³/s, ₹, L) is checked against the tool evidence. Anything untraceable sends the agent back to self-correct once. The UI shows "✔ 9/9 data figures verified against live sources". |
 | 🔁 **Live agent trace** | Judges and farmers can watch the reasoning summary, each tool call with its inputs, timing, sources and evidence ID, the verification step and any self-correction. |
 | 🛰️ **Satellite crop vigour** | Cloud-masked Sentinel-2 NDVI for a 150 m window around the field, its recent trend, and a comparison with the same period last year, read directly from Cloud-Optimised GeoTIFFs. |
 | 📣 **Kavach Sentinel (autonomous)** | Register a farm once. A background monitor re-analyses it every few hours, raises de-duplicated alerts (heavy rain, heat/cold waves, crop stress, irrigation due or hold, river flood, nearby disasters), writes them in the farmer's language and pushes them to **Telegram**. |
 | 🗣️ **Multilingual voice** | 11 languages (English, Hindi, Marathi, Bengali, Telugu, Tamil, Gujarati, Kannada, Malayalam, Punjabi, Odia) for answers. Speech in and out uses the browser's Web Speech API (no extra key). The UI itself is in English and Hindi. |
-| 🧯 **Never a blank screen** | If Claude is unreachable, slow or misconfigured, a rule-based advisor answers from the same live evidence. If one data source is down, only its card degrades. |
+| 🧯 **Never a blank screen** | If the AI is unreachable, rate-limited, slow or misconfigured, a rule-based advisor answers from the same live evidence. If one data source is down, only its card degrades. |
 
 ## 3. Why it is different (USP)
 
@@ -71,7 +71,7 @@ flowchart LR
     end
     subgraph Server["FastAPI service (one container)"]
         API["REST + Server-Sent Events"]
-        AG["Claude agent loop<br/>plan → parallel tools → verify → self-correct"]
+        AG["LLM agent loop (Gemini or Claude)<br/>plan → parallel tools → verify → self-correct"]
         VR["Grounding verifier"]
         RB["Rule-based advisor<br/>(fallback)"]
         TL["13 tools<br/>pydantic validation + evidence ledger"]
@@ -88,7 +88,7 @@ flowchart LR
         AM["Agmarknet via data.gov.in"]
         OSM["OSM Nominatim"]
     end
-    CL["Claude API<br/>claude-opus-5-5"]
+    CL["LLM API<br/>Google Gemini or Anthropic Claude"]
     TG["Telegram Bot API"]
 
     UI <--> API
@@ -116,7 +116,7 @@ sequenceDiagram
     autonumber
     participant F as Farmer (voice/text, any of 11 languages)
     participant A as Agent loop
-    participant C as Claude (adaptive thinking)
+    participant C as LLM (Gemini or Claude)
     participant T as Tools + live APIs
     participant V as Verifier
     F->>A: "इस हफ्ते खेत में क्या करूँ?" + farm profile
@@ -135,7 +135,7 @@ sequenceDiagram
     A-->>F: verified answer (streamed) + trace + speech
 ```
 
-If Claude is unreachable, slow, rate-limited or misconfigured, the turn is rolled back and the **rule-based advisor** answers from the same
+If the LLM is unreachable, slow, rate-limited or misconfigured, the turn is rolled back and the **rule-based advisor** answers from the same
 tools. All of this is shown live in the UI's *Agent trace* panel. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the state machine,
 module map and failure matrix.
 
@@ -153,7 +153,7 @@ module map and failure matrix.
 | [GDACS](https://www.gdacs.org) (UN OCHA / EC JRC) | Active cyclones, floods, earthquakes, droughts, wildfires | no |
 | [Agmarknet via data.gov.in](https://data.gov.in/resource/current-daily-price-various-commodities-various-markets-mandi) | Daily wholesale mandi prices (₹/quintal) | free key |
 | [OSM Nominatim](https://nominatim.org) | Village / district / state for a coordinate | no |
-| [Claude API](https://docs.claude.com) | Reasoning, planning, language | yes |
+| [Gemini API](https://ai.google.dev) (free tier) **or** [Claude API](https://docs.claude.com) | Reasoning, planning, language | one of the two |
 | [Telegram Bot API](https://core.telegram.org/bots/api) | Pushing Sentinel alerts | optional |
 
 The only constants in the code are **published science**: FAO-56 crop coefficients, stage lengths and depletion fractions, IMD thresholds,
@@ -173,11 +173,12 @@ API-shaped responses used **only** by the offline test suite; the application ne
   * The soil connector falls back to Saxton & Rawls pedotransfer functions.
   * The STAC search falls back to an alternative collection.
 * **Agent resilience:**
-  * SDK retries, plus Anthropic **server-side refusal fallbacks** (`fallbacks: "default"`).
+  * SDK retries for transient errors and rate limits; on Claude, Anthropic's **server-side refusal fallbacks** (`fallbacks: "default"`);
+    on Gemini, an automatic model fallback chain if the configured model is not available to the key.
   * A compatibility retry if optional request features are rejected.
   * Turn timeouts, and history rollback so a session never breaks.
   * The rule-based advisor as the last line of defence.
-* **Input validation:** pydantic on every API request and every tool call. Invalid tool inputs go back to Claude with the exact problems so
+* **Input validation:** pydantic on every API request and every tool call. Invalid tool inputs go back to the model with the exact problems so
   it can correct itself.
 * **Safety:**
   * A static system prompt; tool output is treated as data, not instructions.
@@ -186,7 +187,8 @@ API-shaped responses used **only** by the offline test suite; the application ne
 
 ## 7. Quick start (local)
 
-**Requirements:** Python 3.11+ and an internet connection. An Anthropic API key is optional; without one, the rule-based mode is used.
+**Requirements:** Python 3.11+ and an internet connection. For the AI agent, set **one** key: `GEMINI_API_KEY` (free tier, from
+[Google AI Studio](https://aistudio.google.com/apikey)) or `ANTHROPIC_API_KEY`. Without a key the rule-based mode is used.
 
 ```bash
 git clone https://github.com/Sameer6556/code-benders.git
@@ -208,7 +210,8 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-Edit `.env` and set `ANTHROPIC_API_KEY`. Also set `DATA_GOV_IN_API_KEY` (free at data.gov.in) for full mandi coverage.
+Edit `.env` and set `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`). Also set `DATA_GOV_IN_API_KEY` (free at data.gov.in) for full
+mandi coverage. With `KK_LLM_PROVIDER=auto`, Claude is used if its key is set, otherwise Gemini.
 
 ```bash
 uvicorn app.main:app --reload --port 8000
@@ -224,7 +227,8 @@ python scripts/smoke_test.py --llm
 ```
 
 This calls all 12 data tools for three farms (Nashik onion, Ludhiana wheat, Patna rice near the Ganga), prints each headline with its latency,
-checks the Claude key, and exits non-zero if a core source fails.
+then runs one real agent turn with your AI key (live tool calls, Hindi answer, verification), and exits non-zero if a core
+source or the agent fails.
 
 ### Run the tests
 
@@ -232,9 +236,9 @@ checks the Claude key, and exits non-zero if a core source fails.
 pytest -q
 ```
 
-62 offline tests cover the agronomy formulas (with published reference values), the verifier (incl. Devanagari digits), HTTP resilience
-(retry, circuit breaker, stale cache, coalescing), every tool end to end, real NDVI reads from GeoTIFFs, the agent loop (parallel tools,
-self-correction, tool-error recovery, outage fallback, compat retry) and the HTTP API including Sentinel alert de-duplication.
+78 offline tests cover the agronomy formulas (with published reference values), the verifier (incl. Devanagari digits), HTTP resilience
+(retry, circuit breaker, stale cache, coalescing), every tool end to end, real NDVI reads from GeoTIFFs, both agent loops, Claude and Gemini (parallel tools,
+self-correction, tool-error recovery, outage and rate-limit fallback, model fallback, compat retry) and the HTTP API including Sentinel alert de-duplication.
 
 ## 8. Deploy
 
@@ -257,7 +261,8 @@ The app is one Docker container listening on `$PORT` (default 7860).
    ---
    ```
 
-4. In the Space settings, add `ANTHROPIC_API_KEY` (and optionally `DATA_GOV_IN_API_KEY` and `TELEGRAM_BOT_TOKEN`) as **secrets**.
+4. In the Space settings, add `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` (and optionally `DATA_GOV_IN_API_KEY` and `TELEGRAM_BOT_TOKEN`)
+   as **secrets**.
 
 **Render:** choose New → Blueprint → this repo (uses [`render.yaml`](render.yaml)), then set the secrets. Free instances sleep when idle, so
 open the URL a minute before judging.
@@ -276,9 +281,16 @@ docker run -p 7860:7860 --env-file .env khetkavach
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | – | Enables the Claude agent (rule-based mode without it) |
+| `GEMINI_API_KEY` | – | Enables the Gemini agent (free tier at aistudio.google.com) |
+| `KK_GEMINI_MODEL` | `gemini-flash-latest` | Gemini model (falls back to `gemini-2.5-flash` if unavailable) |
+| `ANTHROPIC_API_KEY` | – | Enables the Claude agent |
 | `KK_MODEL` | `claude-opus-5-5` | Claude model for the agent and alert wording |
-| `KK_EFFORT` | `medium` | Reasoning effort (`low` = faster/cheaper, `high` = deeper) |
+| `KK_LLM_PROVIDER` | `auto` | `auto` (Claude if its key is set, else Gemini), `gemini`, `claude` or `rules` |
+| `KK_EFFORT` | `medium` | Claude reasoning effort (`low` = faster/cheaper, `high` = deeper) |
+
+> **Gemini free tier:** it has per-minute and per-day request limits. One farmer question uses 2–4 model calls. If a limit is hit
+> mid-demo, the rule-based advisor answers automatically and the trace says why. Under Google's terms, free-tier prompts may be used to
+> improve Google's products, so don't send personal data.
 | `DATA_GOV_IN_API_KEY` | public sample key | Agmarknet mandi prices (sample key: max 10 records) |
 | `TELEGRAM_BOT_TOKEN` | – | Push Sentinel alerts to farmers' Telegram |
 | `KK_SENTINEL_INTERVAL_MIN` | `180` | Background monitoring interval (0 = off) |
@@ -300,12 +312,13 @@ app/
 ├── agronomy/            pure science: water (FAO-56), spray (Delta-T), stress (IMD, Hutton),
 │                        climate (normals), hydrology (Gumbel), soil (USDA, Saxton-Rawls), crops (constants)
 ├── tools/               13 agent/dashboard tools, registry (schemas, validation, execution)
-├── agent/               Claude loop, prompts, verifier, sessions, rule-based fallback
+├── agent/               shared agent core (base.py), Claude and Gemini loops, prompts, verifier, sessions,
+│                        provider factory, rule-based fallback
 ├── sentinel/            autonomous monitor + Telegram delivery
 ├── api/                 REST + SSE routes, dashboard streamer
 └── static/              single-page app (vanilla JS modules, vendored Leaflet + Chart.js)
 scripts/smoke_test.py    live end-to-end integration check
-tests/                   62 offline tests (fakes.py = test-only API stand-ins)
+tests/                   78 offline tests (fakes.py = test-only API stand-ins)
 docs/                    architecture, pitch deck, demo script, submission text, judge Q&A
 ```
 

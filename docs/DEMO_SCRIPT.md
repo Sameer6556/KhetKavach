@@ -30,7 +30,7 @@ Live demonstration is **30% of the score** and the system must not crash. This f
 | 0:30 | Cards streaming in; zoom on weather + irrigation charts | "Each card is computed for this farm. The irrigation plan is an FAO-56 water balance on this field's soil. Here it says hold irrigation, rain is coming, and shows the litres per acre saved." |
 | 0:55 | Flood + satellite cards | "River discharge compared with 2-, 5- and 20-year flood levels from 40 years of reanalysis. Sentinel-2 NDVI from the satellite, cloud-masked, versus last year." |
 | 1:10 | Switch to chat, Hindi, press 🎙️, ask "इस हफ्ते मुझे खेत में क्या करना चाहिए?" | "Now I ask in Hindi, by voice." |
-| 1:20 | Trace panel: thinking, 4 tools in parallel, evidence IDs | "The Claude agent plans, calls four tools in parallel, and every result becomes evidence with a source and timestamp." |
+| 1:20 | Trace panel: thinking, 4 tools in parallel, evidence IDs | "The AI agent plans, calls four tools in parallel, and every result becomes evidence with a source and timestamp." |
 | 1:40 | Final answer + ✔ verification badge + 🔊 | "Before I see the answer, our verifier checks every number against the evidence: 9 of 9 verified. It reads the answer aloud." |
 | 1:55 | Ask "प्याज का भाव?" or a misspelt commodity → error + retry in the trace | "When a tool fails, the error carries a hint and the agent corrects itself." |
 | 2:10 | Sentinel tab → Scan now → phone shows the Telegram alert | "Sentinel watches registered farms on its own and pushes alerts to the farmer's phone." |
@@ -60,7 +60,7 @@ Record at 1080p, cursor highlighted, no edits that hide latency. Rule: no pre-re
 |---|---|
 | A card says "unavailable" | "That provider is down right now. Our circuit breaker isolated it; every other card still works, and the agent is told not to guess." Show `/api/health`. |
 | A card shows **stale** | "The source is down, so we serve the last good reading with its timestamp. Real data, clearly labelled." |
-| Claude is slow | Keep talking over the live trace; that's the point of streaming it. Lower `KK_EFFORT=low` beforehand if the venue network is slow. |
-| Claude errors (key, rate limit) | The rule-based advisor answers automatically (yellow "Rule-based" chip). Say so; it is designed behaviour. |
+| The AI is slow | Keep talking over the live trace; that's the point of showing it. On Claude, set `KK_EFFORT=low` beforehand if the venue network is slow. |
+| AI errors (key, rate limit) | The rule-based advisor answers automatically (yellow "Rule-based" chip). Say so; it is designed behaviour. On the Gemini free tier, leave a few seconds between questions so you stay under the per-minute limit. |
 | Mic not working | Type the Hindi question, or pick a suggested question. |
 | Venue internet fails | Switch to the phone hotspot. Cached cards stay visible. |

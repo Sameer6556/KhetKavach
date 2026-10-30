@@ -71,28 +71,47 @@ async def check_farm(executor: ToolExecutor, name: str, lat: float, lon: float, 
     return failures
 
 
-async def check_llm() -> bool:
-    import anthropic
+async def check_llm(ctx: ToolContext) -> bool:
+    """Run one real agent turn (planning, live tool calls, verification) with the configured provider."""
+    from app.agent.factory import build_agent
+    from app.agent.sessions import SessionStore
+    from app.schemas import FarmProfile
 
     settings = get_settings()
     if not settings.llm_enabled:
-        print("\n✘ ANTHROPIC_API_KEY is not set: the app will run in rule-based mode.")
+        print("\n✘ No GEMINI_API_KEY or ANTHROPIC_API_KEY: the app will run in rule-based mode.")
         return False
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    agent = build_agent(settings)
+    farm = FarmProfile(lat=20.08, lon=74.11, crop="onion", sowing_date=date.today() - timedelta(days=45),
+                       irrigation_method="drip", language="hi")
+    session = SessionStore(ctx).get_or_create(None, farm)
+    print(f"\n=== Agent turn with {agent.provider} ({agent.model}), answer in Hindi")
+
+    async def emit(ev: dict) -> None:
+        if ev["type"] == "tool_start":
+            print(f"  → {ev['name']}")
+        elif ev["type"] == "tool_end":
+            print(f"  {'✔' if ev['ok'] else '✘'} {ev['name']} {ev['evidence_id'] or (ev['error'] or {}).get('message', '')}")
+        elif ev["type"] in ("notice", "verification"):
+            print(f"  ! {ev.get('message') or ev.get('report')}")
+
     try:
-        msg = await client.messages.create(model=settings.model, max_tokens=1024, output_config={"effort": "low"},
-                                           messages=[{"role": "user", "content": "Reply with the single word OK."}])
-    except anthropic.APIError as exc:
-        print(f"\n✘ Claude ({settings.model}): {type(exc).__name__}: {exc}")
+        final = await agent.run_turn(session, "Should I irrigate my onion field this week?", emit)
+    finally:
+        await agent.aclose()
+    v = final["verification"]
+    print(f"\n{final['text']}\n\n  mode={final['mode']} model={final.get('model')} "
+          f"verified={v['supported']}/{v['data_figures']} usage={final.get('usage')}")
+    if final["mode"] != "ai":
+        print(f"\n✘ {agent.provider} did not answer (see the notice above); the app fell back to rules.")
         return False
-    text = "".join(b.text for b in msg.content if b.type == "text").strip()
-    print(f"\n✔ Claude ({msg.model}) replied: {text!r}; usage {msg.usage.input_tokens} in / {msg.usage.output_tokens} out")
+    print(f"\n✔ {agent.provider} agent works end to end.")
     return True
 
 
 async def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--llm", action="store_true", help="also verify the Anthropic API key and model")
+    parser.add_argument("--llm", action="store_true", help="also run one real agent turn with the configured AI key")
     args = parser.parse_args()
     settings = get_settings()
     with tempfile.TemporaryDirectory() as tmp:
@@ -106,9 +125,9 @@ async def main() -> int:
         print("\nSource health:")
         for source, health in dc.health().items():
             print(f"  {source:<22} {health['status']:<12} calls={health['calls']:<3} last_error={health['last_error'] or '-'}")
+        llm_ok = await check_llm(ctx) if args.llm else True
         await dc.aclose()
         db.close()
-    llm_ok = await check_llm() if args.llm else True
     if settings.using_sample_mandi_key:
         print("\nNote: DATA_GOV_IN_API_KEY not set; mandi prices use the public sample key (10 records max).")
     if failures or not llm_ok:

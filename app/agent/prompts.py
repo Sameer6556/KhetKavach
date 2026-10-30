@@ -41,6 +41,14 @@ SYSTEM_PROMPT = """You are KhetKavach ("farm shield"), a climate-risk and crop a
 </answer_style>"""
 
 
+REFUSAL_TEXT = ("I can't help with that request. I can help with weather, crops, irrigation, prices and "
+                "climate risks for your farm.")
+
+ALERT_SYSTEM = ("You write short SMS-style farm alerts for Indian farmers. Use only the facts in <facts>. "
+                "Two or three sentences: what is coming, when, and one concrete action. Units as symbols "
+                "(mm, °C, %, km/h, m³/s), Western digits, no greeting or sign-off.")
+
+
 def language_name(code: str) -> str:
     return LANGUAGES.get(code, LANGUAGES["en"])[0]
 

@@ -23,7 +23,7 @@ served and flagged stale with its timestamp. Otherwise only that card shows "una
 
 **Q: Is this just a ChatGPT wrapper?**
 No. The model never sees raw APIs. It calls 13 tools that run real computations, such as an FAO-56 water balance, Gumbel flood return
-levels, Delta-T spray windows and NDVI from satellite rasters. The loop in `app/agent/loop.py` is ours:
+levels, Delta-T spray windows and NDVI from satellite rasters. The loop is ours (`app/agent/base.py` plus `gemini_agent.py` / `claude_agent.py`):
 
 * parallel tool execution and pydantic validation;
 * error hints for self-correction;
@@ -46,11 +46,14 @@ retries with the right name; both calls are visible in the trace. Verifier-drive
 asking the agent to self-correct").
 
 **Q: Which model and why?**
-`claude-opus-5-5`, with adaptive thinking (summaries shown in the trace) and `effort` configurable via `KK_EFFORT`. The system prompt and
-tool list are static and prompt-cached, so repeat questions cost less. Server-side refusal fallback is enabled.
+Either Google Gemini (free tier; default `gemini-flash-latest`) or Anthropic Claude (`claude-opus-5-5`), chosen by which key is set
+(`KK_LLM_PROVIDER`). Both run the same loop design: `app/agent/base.py` holds the shared lifecycle, and `gemini_agent.py` /
+`claude_agent.py` hold only the provider-specific request and response handling. Gemini keeps its thought signatures by appending
+the model's content verbatim. Claude uses adaptive thinking, prompt caching and server-side refusal fallback. Swapping models never
+changes the tools, the verifier or the UI.
 
 **Q: Multilingual?**
-Claude writes the answer in the farmer's language (11 options). The browser's Web Speech API does speech-to-text and text-to-speech
+The LLM writes the answer in the farmer's language (11 options). The browser's Web Speech API does speech-to-text and text-to-speech
 with the matching locale (`hi-IN`, `ta-IN`, …). Units stay as symbols, which keeps verification language-agnostic.
 
 ## Science
@@ -81,7 +84,8 @@ Server-Sent Events. Each tool completion (dashboard) and each agent step (chat) 
 closing the stream.
 
 **Q: How did you test without burning API credits?**
-62 offline tests use an httpx mock transport that answers in each API's documented response shape, a scripted Claude stand-in, and
+78 offline tests use an httpx mock transport that answers in each API's documented response shape, scripted Claude and Gemini
+stand-ins (the Gemini one built from the real `google-genai` types), and
 synthetic GeoTIFFs for the satellite path. `scripts/smoke_test.py` then checks the real integrations live.
 
 **Q: Scaling?**

@@ -396,3 +396,43 @@ def last_tool_results(messages: list[dict]) -> dict[str, dict]:
     """Map tool_use_id -> parsed tool_result payload from the latest user turn."""
     content = messages[-1]["content"]
     return {r["tool_use_id"]: json.loads(r["content"]) for r in content if isinstance(r, dict) and r.get("type") == "tool_result"}
+
+
+# ======================================================================================= Gemini stand-in
+class ScriptedGemini:
+    """Mimics `client.aio.models.generate_content`: call i returns script[i](model, contents, config).
+
+    Responses are real `google.genai.types` objects, so the tests also check our use of the SDK types.
+    """
+
+    def __init__(self, script: list[Callable[..., Any]]):
+        self.script = script
+        self.requests: list[dict[str, Any]] = []
+        outer = self
+
+        class _Models:
+            async def generate_content(self, *, model: str, contents: Any, config: Any = None) -> Any:
+                outer.requests.append({"model": model, "contents": list(contents) if isinstance(contents, list) else contents,
+                                       "config": config})
+                step = outer.script[min(len(outer.requests) - 1, len(outer.script) - 1)]
+                return step(model, contents, config)
+
+        class _Aio:
+            models = _Models()
+
+        self.aio = _Aio()
+
+
+def gemini_response(*parts: Any, finish: str = "STOP", model_version: str = "gemini-test") -> Any:
+    from google.genai import types
+
+    candidate = types.Candidate(content=types.Content(role="model", parts=list(parts)) if parts else None, finish_reason=finish)
+    return types.GenerateContentResponse(
+        candidates=[candidate], model_version=model_version,
+        usage_metadata=types.GenerateContentResponseUsageMetadata(prompt_token_count=1200, candidates_token_count=250,
+                                                                  thoughts_token_count=120, cached_content_token_count=0))
+
+
+def last_function_responses(contents: list[Any]) -> dict[str, dict]:
+    """Map tool name -> function response payload from the latest user turn."""
+    return {p.function_response.name: p.function_response.response for p in contents[-1].parts if p.function_response}

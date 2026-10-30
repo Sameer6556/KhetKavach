@@ -9,8 +9,8 @@ every failure is handled. Every team member should be able to walk a judge throu
 |---|---|---|---|
 | Presentation | `app/static` | Map, dashboard cards/charts, chat, agent trace, voice, Sentinel UI | API over REST + SSE |
 | API | `app/api` | Validation, rate limiting, SSE streaming, farm/alert CRUD | agent, tools, sentinel |
-| Agent | `app/agent` | Claude tool-use loop, prompts, verifier, sessions, rule-based fallback | Claude API, tools |
-| Autonomy | `app/sentinel` | Periodic farm sweeps, alert rules, wording, Telegram delivery | tools, Claude, DB |
+| Agent | `app/agent` | Shared agent core + Gemini and Claude tool-use loops, prompts, verifier, sessions, rule-based fallback | Gemini or Claude API, tools |
+| Autonomy | `app/sentinel` | Periodic farm sweeps, alert rules, wording, Telegram delivery | tools, LLM, DB |
 | Tools | `app/tools` | 13 capabilities = live data + science; input models; evidence capture | sources, agronomy |
 | Science | `app/agronomy` | Pure functions: FAO-56, Delta-T, IMD, Hutton, Gumbel, normals, soil | nothing (no I/O) |
 | Connectors | `app/sources` | One module per API: request + defensive parsing (+ self-healing) | `DataClient` |
@@ -37,13 +37,15 @@ Saxton-Rawls loam values). Connectors do **only** I/O and parsing, which keeps t
 2. **First turn:** a `<farm_context>` block (today's date, coordinates, crop, sowing date, irrigation, reply language) is prepended to
    the question. The system prompt itself is static, so the tools + system prefix is cached across all users.
 3. **Loop** (at most `KK_MAX_AGENT_STEPS`):
-   1. Stream a Claude request (`claude-opus-5-5`, adaptive thinking with summarized display, `effort` configurable, server-side refusal
-      fallback, prompt caching). Thinking summaries and text deltas are relayed to the UI as they arrive.
-   2. If Claude requests tools, every `tool_use` is validated with its pydantic model and executed **concurrently**. All results go back in
+   1. Call the configured LLM. **Gemini** (`google-genai`): function declarations generated from the same pydantic models, automatic
+      function calling off, thought summaries on, and the model's content appended verbatim so its thought signatures survive.
+      **Claude** (`anthropic`): streamed, adaptive thinking with summarized display, `effort` configurable, server-side refusal fallback,
+      prompt caching. Thinking summaries (and, for Claude, text deltas) are relayed to the UI as they arrive.
+   2. If the model requests tools, every `tool_use` is validated with its pydantic model and executed **concurrently**. All results go back in
       **one** user message. Failures come back as `is_error` results with a `hint`; for example, the mandi tool lists the commodities
-      traded today, so Claude can retry with the right name.
-   3. If Claude answers, the verifier checks it. On failure, a `<verification_feedback>` message is appended (history stays append-only)
-      and Claude revises once.
+      traded today, so the model can retry with the right name.
+   3. If the model answers, the verifier checks it. On failure, a `<verification_feedback>` message is appended (history stays
+      append-only) and the model revises once.
    4. On the last allowed step, `tool_choice: none` forces a final answer.
 4. **Final event:** the answer, verification report, evidence list (with sources), token usage and mode (`ai` / `rules`).
 
@@ -73,7 +75,7 @@ Every `KK_SENTINEL_INTERVAL_MIN` minutes, or when `POST /api/sentinel/scan` is c
    * irrigation due, or "hold for rain", within 2 days
    * a river flood at moderate or above
    * an Orange/Red GDACS event within 300 km
-3. Word each alert in the farmer's language with Claude (low effort). The wording is verified against the alert facts; if it fails, a
+3. Word each alert in the farmer's language with the configured LLM. The wording is verified against the alert facts; if it fails, a
    template is used instead.
 4. Insert alerts with a `UNIQUE(farm, kind, day)` constraint, so repeated sweeps don't spam the farmer. New alerts are pushed to Telegram.
 
@@ -100,10 +102,12 @@ The prompt also forbids computing new numbers. Tools pre-compute totals, gaps, p
 | Upstream down, no cache | `SourceError` → `ToolError` | That card says "unavailable"; agent told *not to estimate* |
 | API format drift | parsers validate shape | Clear "unexpected response format" error; self-healing alternatives tried first |
 | Soil API down | irrigation tool | Falls back to FAO-56 Table 19 loam, flagged "assumed / lower confidence" |
-| Bad tool input from Claude | pydantic | `is_error` result listing the invalid fields → Claude fixes and retries |
+| Bad tool input from the model | pydantic | Error result listing the invalid fields → the model fixes and retries |
 | Claude 400 on optional features | `BadRequestError` | One retry without betas/eager streaming |
-| Claude safety decline | `stop_reason: refusal` | Server-side fallback model, else a polite redirect |
-| Claude unreachable / bad key / rate limit / timeout | `AIUnavailable` | Turn rolled back; rule-based advisor answers from live tools |
+| Gemini model not available to the key (404) | `ClientError` | Next model in the chain (`gemini-flash-latest`, `gemini-2.5-flash`) |
+| Gemini model rejects thinking config | `ClientError` 400 | One retry without `thinking_config` |
+| Safety decline | Claude `refusal` / Gemini `SAFETY` finish | Claude: server-side fallback model; both: a polite redirect |
+| LLM unreachable / bad key / rate limit (e.g. Gemini free tier) / timeout | `AIUnavailable` | Turn rolled back; rule-based advisor answers from live tools |
 | Client disconnects mid-turn | `CancelledError` | Turn rolled back; session stays valid |
 | Abuse of the public URL | per-IP sliding window | HTTP 429 with a friendly message |
 

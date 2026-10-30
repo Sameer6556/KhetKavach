@@ -1,4 +1,4 @@
-"""The KhetKavach agent loop on the Claude API (manual tool-use loop with streaming).
+"""Claude implementation of the KhetKavach agent loop (Anthropic Messages API, streaming tool use).
 
 One user turn:
   1. Claude plans and requests tools (often several in parallel).
@@ -6,100 +6,54 @@ One user turn:
      (errors include hints so Claude can self-correct, e.g. retry with the right commodity name).
   3. When Claude answers, the grounding verifier checks every data figure against the evidence.
      If something does not trace back, Claude gets one chance to revise (self-correction).
-  4. If the API is unreachable, times out or rejects the key, we fall back to the rule-based advisor.
+  4. If the API is unreachable, times out or rejects the key, `BaseAgent` falls back to the
+     rule-based advisor and rolls the turn back so the session stays valid.
 
-Every step is streamed to the UI as an event so judges and farmers can watch the reasoning.
-History is append-only (thinking blocks are passed back unchanged), and a failed turn is rolled
-back to its starting point so the session stays valid.
+Every step is streamed to the UI. History is append-only: thinking blocks are passed back unchanged.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from dataclasses import dataclass
-from datetime import date
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import anthropic
 from anthropic import AsyncAnthropic
 
 from ..config import Settings
 from ..tools.registry import tool_schemas
-from .fallback import rule_based_turn, tool_end_event
-from .prompts import SYSTEM_PROMPT, farm_context_block, verifier_feedback
+from .base import MAX_REVISIONS, AIUnavailable, BaseAgent, Emit, Usage
+from .prompts import REFUSAL_TEXT, SYSTEM_PROMPT, verifier_feedback
 from .sessions import ChatSession
 from .verifier import verify
 
 log = logging.getLogger(__name__)
 
-Emit = Callable[[dict[str, Any]], Awaitable[None]]
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 MAX_TOKENS = 16000
-MAX_REVISIONS = 1
 
 
-class AIUnavailable(Exception):
-    pass
+class ClaudeAgent(BaseAgent):
+    provider = "claude"
 
-
-@dataclass
-class Usage:
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
-    llm_calls: int = 0
-    tool_calls: int = 0
-
-    def add(self, usage: Any) -> None:
-        self.llm_calls += 1
-        if usage is None:
-            return
-        self.input_tokens += getattr(usage, "input_tokens", 0) or 0
-        self.output_tokens += getattr(usage, "output_tokens", 0) or 0
-        self.cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
-        self.cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
-
-    def to_dict(self) -> dict[str, int]:
-        return dict(self.__dict__)
-
-
-class FarmAgent:
     def __init__(self, settings: Settings, client: AsyncAnthropic | None):
-        self.settings = settings
+        super().__init__(settings)
         self.client = client
         self._compat = False  # True once the API rejected optional request features
         self._tools_full = tool_schemas()
         self._tools_compat = [{k: v for k, v in t.items() if k != "eager_input_streaming"} for t in self._tools_full]
 
-    async def run_turn(self, session: ChatSession, question: str, emit: Emit) -> dict[str, Any]:
-        if self.client is None:
-            return await rule_based_turn(session, question, emit, "no ANTHROPIC_API_KEY configured")
-        checkpoint = len(session.messages)
-        try:
-            return await asyncio.wait_for(self._agent_turn(session, question, emit),
-                                          timeout=self.settings.agent_timeout_s)
-        except (AIUnavailable, asyncio.TimeoutError) as exc:
-            del session.messages[checkpoint:]  # roll back the incomplete turn; earlier history is untouched
-            reason = "timed out" if isinstance(exc, asyncio.TimeoutError) else str(exc)
-            log.warning("Agent turn failed (%s); falling back to rules", reason)
-            return await rule_based_turn(session, question, emit, reason)
-        except asyncio.CancelledError:
-            del session.messages[checkpoint:]  # client disconnected: keep the session valid
-            raise
-        except Exception:
-            # An unexpected bug must not leave the farmer without an answer during a live demo.
-            del session.messages[checkpoint:]
-            log.exception("Agent turn crashed; falling back to rules")
-            return await rule_based_turn(session, question, emit, "internal error")
+    @property
+    def enabled(self) -> bool:
+        return self.client is not None
+
+    @property
+    def model(self) -> str:
+        return self.settings.model
 
     async def _agent_turn(self, session: ChatSession, question: str, emit: Emit) -> dict[str, Any]:
-        first_turn = not session.started
-        user_text = question
-        if first_turn:
-            user_text = farm_context_block({**session.farm.model_dump(mode="json")}, date.today()) + "\n\n" + question
+        user_text = self.opening_text(session, question)
         session.messages.append({"role": "user", "content": user_text})
         usage, revisions = Usage(), 0
 
@@ -112,8 +66,7 @@ class FarmAgent:
                 await emit({"type": "notice", "message": f"Served by fallback model {message.model}."})
 
             if message.stop_reason == "refusal":
-                text = "I can't help with that request. I can help with weather, crops, irrigation, prices and climate risks for your farm."
-                return await self._final(emit, session, text, usage, message.model, verify(text, session.ledger))
+                return await self.finish(emit, session, REFUSAL_TEXT, usage, message.model, verify(REFUSAL_TEXT, session.ledger))
             if message.stop_reason == "pause_turn":
                 continue
 
@@ -121,7 +74,12 @@ class FarmAgent:
             if tool_uses:
                 if message.stop_reason == "max_tokens":
                     raise AIUnavailable("model output was cut off mid tool call")
-                session.messages.append({"role": "user", "content": await self._run_tools(session, tool_uses, emit, usage)})
+                runs = await self.run_tools(session, [(b.id, b.name, b.input) for b in tool_uses], emit, usage)
+                # All results go back in ONE user message, which keeps parallel tool use working well.
+                session.messages.append({"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": b.id, "is_error": not run.ok,
+                     "content": json.dumps(run.result_payload(), ensure_ascii=False, default=str)}
+                    for b, run in zip(tool_uses, runs)]})
                 continue
 
             text = "".join(b.text for b in message.content if b.type == "text").strip()
@@ -134,28 +92,8 @@ class FarmAgent:
                 session.messages.append({"role": "user", "content": verifier_feedback(
                     report.unsupported, report.unknown_citations, report.missing_citations)})
                 continue
-            return await self._final(emit, session, text, usage, message.model, report, revised=revisions > 0)
+            return await self.finish(emit, session, text, usage, message.model, report, revised=revisions > 0)
         raise AIUnavailable("step limit reached without an answer")
-
-    async def _final(self, emit: Emit, session: ChatSession, text: str, usage: Usage, model: str,
-                     report: Any, revised: bool = False) -> dict[str, Any]:
-        event = {"type": "final", "text": text, "verification": report.to_dict(), "self_corrected": revised,
-                 "evidence": [ev.public() for ev in session.ledger.all()], "usage": usage.to_dict(),
-                 "mode": "ai", "model": model}
-        await emit(event)
-        return event
-
-    async def _run_tools(self, session: ChatSession, tool_uses: list[Any], emit: Emit, usage: Usage) -> list[dict]:
-        for block in tool_uses:
-            await emit({"type": "tool_start", "id": block.id, "name": block.name, "input": block.input})
-        usage.tool_calls += len(tool_uses)
-        runs = await asyncio.gather(*(session.executor.run(b.name, b.input) for b in tool_uses))
-        results = []
-        for block, run in zip(tool_uses, runs):
-            await emit(tool_end_event(block.id, run))
-            results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": not run.ok,
-                            "content": json.dumps(run.result_payload(), ensure_ascii=False, default=str)})
-        return results  # all results in ONE user message, which keeps parallel tool use working well
 
     async def _call(self, messages: list[dict], emit: Emit, usage: Usage, force_answer: bool = False) -> Any:
         assert self.client is not None
@@ -182,7 +120,9 @@ class FarmAgent:
                     async for event in stream:
                         await _forward(event, emit)
                     message = await stream.get_final_message()
-                usage.add(message.usage)
+                u = message.usage
+                usage.add(getattr(u, "input_tokens", 0), getattr(u, "output_tokens", 0),
+                          getattr(u, "cache_read_input_tokens", 0), getattr(u, "cache_creation_input_tokens", 0))
                 return message
             except ValueError:
                 # Tool-input JSON the SDK could not parse (eager input streaming): re-issue the turn.
@@ -208,6 +148,27 @@ class FarmAgent:
                 raise AIUnavailable(f"Anthropic API error {exc.status_code}") from None
             except anthropic.APIConnectionError:
                 raise AIUnavailable("cannot reach the Anthropic API") from None
+
+    async def write_short(self, system: str, prompt: str) -> str | None:
+        if self.client is None:
+            return None
+        kwargs: dict[str, Any] = {"model": self.settings.model, "max_tokens": 2048, "system": system,
+                                  "output_config": {"effort": "low"},
+                                  "messages": [{"role": "user", "content": prompt}]}
+        if not self._compat:
+            kwargs.update(betas=[FALLBACK_BETA], fallbacks="default")
+        try:
+            msg = await self.client.beta.messages.create(**kwargs)
+        except anthropic.APIError as exc:
+            log.info("Short completion unavailable: %s", type(exc).__name__)
+            return None
+        if msg.stop_reason == "refusal":
+            return None
+        return "".join(b.text for b in msg.content if b.type == "text").strip() or None
+
+    async def aclose(self) -> None:
+        if self.client is not None and hasattr(self.client, "close"):
+            await self.client.close()
 
 
 async def _forward(event: Any, emit: Emit) -> None:

@@ -60,10 +60,17 @@ class Settings:
     agent_timeout_s: float
     max_agent_steps: int
     contact: str
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-flash-latest"
+    llm_provider: str = "rules"  # resolved provider: "claude" | "gemini" | "rules"
 
     @property
     def llm_enabled(self) -> bool:
-        return bool(self.anthropic_api_key)
+        return self.llm_provider != "rules"
+
+    @property
+    def active_model(self) -> str | None:
+        return {"claude": self.model, "gemini": self.gemini_model}.get(self.llm_provider)
 
     @property
     def user_agent(self) -> str:
@@ -81,8 +88,14 @@ def get_settings() -> Settings:
         log.warning("Unknown KK_EFFORT=%r, using 'medium'", effort)
         effort = "medium"
 
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "").strip() or None
+    gemini_key = (os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")).strip() or None
+
     settings = Settings(
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip() or None,
+        anthropic_api_key=anthropic_key,
+        gemini_api_key=gemini_key,
+        gemini_model=os.getenv("KK_GEMINI_MODEL", "gemini-flash-latest").strip(),
+        llm_provider=_resolve_provider(os.getenv("KK_LLM_PROVIDER", "auto"), anthropic_key, gemini_key),
         model=os.getenv("KK_MODEL", "claude-opus-5-5").strip(),
         effort=effort,
         data_gov_in_api_key=mandi_key or DATA_GOV_IN_SAMPLE_KEY,
@@ -98,6 +111,24 @@ def get_settings() -> Settings:
     )
     if settings.using_sample_mandi_key:
         log.warning("DATA_GOV_IN_API_KEY not set: using data.gov.in's public sample key (max 10 records/call).")
-    if not settings.llm_enabled:
-        log.warning("ANTHROPIC_API_KEY not set: the AI agent is disabled; deterministic advisories still work.")
+    if settings.llm_enabled:
+        log.info("AI agent: %s (%s)", settings.llm_provider, settings.active_model)
+    else:
+        log.warning("No GEMINI_API_KEY or ANTHROPIC_API_KEY: the AI agent is off; rule-based advisories still work.")
     return settings
+
+
+def _resolve_provider(requested: str, anthropic_key: str | None, gemini_key: str | None) -> str:
+    """KK_LLM_PROVIDER=auto picks Claude if its key is set, else Gemini, else the rule-based advisor."""
+    choice = requested.strip().lower()
+    available = {"claude": bool(anthropic_key), "gemini": bool(gemini_key)}
+    if choice in available:
+        if not available[choice]:
+            log.warning("KK_LLM_PROVIDER=%s but its API key is missing; using rule-based advisories.", choice)
+            return "rules"
+        return choice
+    if choice not in ("auto", "", "rules"):
+        log.warning("Unknown KK_LLM_PROVIDER=%r; using auto.", requested)
+    if choice == "rules":
+        return "rules"
+    return "claude" if available["claude"] else "gemini" if available["gemini"] else "rules"

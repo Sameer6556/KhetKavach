@@ -25,7 +25,8 @@ weather hazards; rain/heat versus the 1991-2020 normal; crop-specific heat, cold
 with rain-aware deferral; pesticide spray windows; a GloFAS river-flood outlook; soil; mandi prices; nearby disasters; air quality; and
 Sentinel-2 NDVI.
 
-A Claude agent (claude-opus-5-5) handles questions in 11 Indian languages, by voice. It:
+An LLM agent (Google Gemini by default for our deployment; Anthropic Claude also supported) handles questions in 11 Indian
+languages, by voice. It:
 
 1. plans which tools to use and calls them in parallel;
 2. recovers from tool errors using the hints they return;
@@ -39,7 +40,8 @@ Telegram. If the LLM is unavailable, a rule-based advisor answers from the same 
 
 **Technical architecture.**
 
-* **Stack:** Python 3.12, FastAPI (REST + Server-Sent Events), SQLite. Anthropic Python SDK with a manual streaming tool-use loop, using
+* **Stack:** Python 3.12, FastAPI (REST + Server-Sent Events), SQLite. A shared agent core with two provider loops: Google Gen AI SDK (Gemini function calling with thought summaries) and the
+  Anthropic Python SDK (Claude streaming tool use), the latter using
   adaptive thinking, prompt caching and server-side refusal fallbacks. Vanilla-JS single-page app with Leaflet, Chart.js and the Web
   Speech API. One Docker container.
 * **Live data:**
@@ -50,7 +52,7 @@ Telegram. If the LLM is unavailable, a rule-based advisor answers from the same 
   * Agmarknet via data.gov.in
   * OSM Nominatim
 * **Models and science:**
-  * Claude for planning and language.
+  * Gemini or Claude for planning and language.
   * FAO-56: Kc × ET₀, climate-adjusted Kc, and a root-zone water balance with stress coefficient Ks.
   * Stull wet-bulb and Delta-T spray rules.
   * IMD heavy-rain, heat-wave, cold-wave and rainfall-departure criteria.

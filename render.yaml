@@ -1,4 +1,5 @@
 # One-click Render deployment (Dashboard -> New -> Blueprint -> pick this repo).
+# Set GEMINI_API_KEY (free tier) or ANTHROPIC_API_KEY; KK_LLM_PROVIDER=auto picks whichever is set.
 services:
   - type: web
     name: khetkavach
@@ -6,12 +7,18 @@ services:
     plan: free
     healthCheckPath: /api/health
     envVars:
+      - key: GEMINI_API_KEY
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: DATA_GOV_IN_API_KEY
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false
+      - key: KK_LLM_PROVIDER
+        value: auto
+      - key: KK_GEMINI_MODEL
+        value: gemini-flash-latest
       - key: KK_MODEL
         value: claude-opus-5-5
       - key: KK_EFFORT

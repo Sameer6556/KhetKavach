@@ -35,7 +35,7 @@ Forge Gen AI Buildathon · Theme 2: Climate, Resource Infrastructure & Global Su
 
 1. **Tap your field** → 12 live analyses stream in: weather + IMD hazards, rain/heat vs 30-year normal, crop stress and disease weather,
    FAO-56 irrigation schedule, spray windows, river-flood outlook, soil, mandi prices, disaster alerts, air quality, satellite NDVI.
-2. **Ask by voice** in Hindi, Marathi, Tamil and 8 more languages. A Claude agent plans, calls tools in parallel and answers with
+2. **Ask by voice** in Hindi, Marathi, Tamil and 8 more languages. An AI agent (Gemini or Claude) plans, calls tools in parallel and answers with
    evidence citations, and the answer is read aloud.
 3. **Every number is verified**: "✔ 9/9 figures traced to live sources".
 4. **Kavach Sentinel** watches registered farms 24×7 and pushes alerts to Telegram: *"Hold irrigation, 72 mm rain on Thursday; saves about
@@ -49,7 +49,7 @@ Forge Gen AI Buildathon · Theme 2: Climate, Resource Infrastructure & Global Su
 
 *(insert the architecture diagram from the README)*
 
-* **Agent loop on Claude (claude-opus-5-5):** plan → parallel tool calls → grounded answer → deterministic verification → one
+* **Agent loop on Gemini or Claude (configurable):** plan → parallel tool calls → grounded answer → deterministic verification → one
   self-correction → stream to the farmer.
 * **13 tools** over **live APIs**: Open-Meteo (ECMWF/GFS/ICON, ERA5, GloFAS, CAMS), ISRIC SoilGrids, Sentinel-2 COGs, GDACS, Agmarknet
   (data.gov.in), OSM.
@@ -57,7 +57,7 @@ Forge Gen AI Buildathon · Theme 2: Climate, Resource Infrastructure & Global Su
   Gumbel 2/5/20-year flood levels, USDA texture.
 * **Resilience:** retries, circuit breakers, stale-if-error cache, self-healing connectors, rule-based fallback, history rollback.
 
-*Note: "The LLM never touches raw data. Tools compute the facts; Claude reasons and explains; the verifier audits."*
+*Note: "The LLM never touches raw data. Tools compute the facts; the LLM reasons and explains; the verifier audits."*
 
 ---
 

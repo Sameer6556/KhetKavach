@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import anthropic
 import httpx
 
-from app.agent.loop import FALLBACK_BETA, FarmAgent
+from app.agent.claude_agent import FALLBACK_BETA, ClaudeAgent
 from app.agent.sessions import SessionStore
 from app.schemas import FarmProfile
 from tests.conftest import FARM, make_settings
@@ -56,7 +56,7 @@ def hallucinated(_messages):
 
 async def test_agent_plans_parallel_tools_and_answers_with_verified_evidence(ctx):
     claude = ScriptedClaude([plan, grounded])
-    agent = FarmAgent(make_settings(ctx.settings.db_path.parent), claude)  # type: ignore[arg-type]
+    agent = ClaudeAgent(make_settings(ctx.settings.db_path.parent), claude)  # type: ignore[arg-type]
     session = SessionStore(ctx).get_or_create(None, farm())
     final, events = await turn(agent, session)
 
@@ -82,7 +82,7 @@ async def test_agent_plans_parallel_tools_and_answers_with_verified_evidence(ctx
 
 async def test_verifier_triggers_one_self_correction(ctx):
     claude = ScriptedClaude([plan, hallucinated, grounded])
-    agent = FarmAgent(make_settings(ctx.settings.db_path.parent), claude)  # type: ignore[arg-type]
+    agent = ClaudeAgent(make_settings(ctx.settings.db_path.parent), claude)  # type: ignore[arg-type]
     session = SessionStore(ctx).get_or_create(None, farm())
     final, events = await turn(agent, session)
 
@@ -107,7 +107,7 @@ async def test_tool_error_hint_lets_agent_retry(ctx):
         best = res["data"]["best_markets"][0]
         return Message([Block("text", text=f"{best['market']} pays ₹{best['modal_price']}/quintal [{res['evidence_id']}].")], "end_turn")
 
-    agent = FarmAgent(make_settings(ctx.settings.db_path.parent), ScriptedClaude([ask_saffron, retry_onion, answer]))  # type: ignore[arg-type]
+    agent = ClaudeAgent(make_settings(ctx.settings.db_path.parent), ScriptedClaude([ask_saffron, retry_onion, answer]))  # type: ignore[arg-type]
     session = SessionStore(ctx).get_or_create(None, farm())
     final, events = await turn(agent, session, "Where should I sell?")
     ends = [e for e in events if e["type"] == "tool_end"]
@@ -119,7 +119,7 @@ async def test_api_outage_falls_back_to_rules_and_rolls_back_history(ctx):
     def down(_m):
         raise anthropic.APIConnectionError(request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
 
-    agent = FarmAgent(make_settings(ctx.settings.db_path.parent), ScriptedClaude([down]))  # type: ignore[arg-type]
+    agent = ClaudeAgent(make_settings(ctx.settings.db_path.parent), ScriptedClaude([down]))  # type: ignore[arg-type]
     session = SessionStore(ctx).get_or_create(None, farm(language="hi"))
     final, events = await turn(agent, session)
     assert final["mode"] == "rules"
@@ -133,7 +133,7 @@ async def test_unexpected_crash_still_answers_with_rules(ctx):
     def buggy(_m):
         raise KeyError("something unexpected")
 
-    agent = FarmAgent(make_settings(ctx.settings.db_path.parent), ScriptedClaude([buggy]))  # type: ignore[arg-type]
+    agent = ClaudeAgent(make_settings(ctx.settings.db_path.parent), ScriptedClaude([buggy]))  # type: ignore[arg-type]
     session = SessionStore(ctx).get_or_create(None, farm())
     final, _ = await turn(agent, session)
     assert final["mode"] == "rules" and session.messages == []
@@ -151,7 +151,7 @@ async def test_bad_request_retries_in_compat_mode(ctx):
         return Message([Block("text", text="I can help with weather, crops and prices for your farm.")], "end_turn")
 
     claude = ScriptedClaude([flaky, flaky])
-    agent = FarmAgent(make_settings(ctx.settings.db_path.parent), claude)  # type: ignore[arg-type]
+    agent = ClaudeAgent(make_settings(ctx.settings.db_path.parent), claude)  # type: ignore[arg-type]
     final, _ = await turn(agent, SessionStore(ctx).get_or_create(None, farm()), "hello")
     assert final["mode"] == "ai"
     assert "betas" not in claude.requests[1] and "fallbacks" not in claude.requests[1]
@@ -159,7 +159,7 @@ async def test_bad_request_retries_in_compat_mode(ctx):
 
 
 async def test_no_api_key_uses_rule_based_advisor(ctx):
-    agent = FarmAgent(make_settings(ctx.settings.db_path.parent), None)
+    agent = ClaudeAgent(make_settings(ctx.settings.db_path.parent), None)
     session = SessionStore(ctx).get_or_create(None, farm())
     final, events = await turn(agent, session, "What is the onion price in the mandi?")
     assert final["mode"] == "rules"

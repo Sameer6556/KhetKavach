@@ -95,8 +95,8 @@ async def health(request: Request) -> dict[str, Any]:
     st = request.app.state
     return {
         "status": "ok", "version": __version__,
-        "ai": {"enabled": st.settings.llm_enabled, "model": st.settings.model if st.settings.llm_enabled else None,
-               "effort": st.settings.effort},
+        "ai": {"enabled": st.agent.enabled, "provider": st.agent.provider, "model": st.agent.model,
+               "effort": st.settings.effort if st.agent.provider == "claude" else None},
         "satellite_enabled": st.settings.satellite_enabled,
         "mandi_key": "sample (limited)" if st.settings.using_sample_mandi_key else "personal",
         "telegram": bool(st.settings.telegram_bot_token),
@@ -112,7 +112,7 @@ async def meta(request: Request) -> dict[str, Any]:
                   for c in CROPS.values()],
         "languages": [{"code": k, "name": v[0], "speech": v[1]} for k, v in LANGUAGES.items()],
         "irrigation_methods": list(IRRIGATION_METHODS),
-        "ai_enabled": request.app.state.settings.llm_enabled,
+        "ai_enabled": request.app.state.agent.enabled,
     }
 
 
@@ -154,7 +154,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
 
     async def produce(emit: Callable[[dict], Awaitable[None]]) -> None:
         async with session.lock:  # one turn at a time per conversation
-            await emit({"type": "session", "session_id": session.id, "ai_enabled": st.settings.llm_enabled})
+            await emit({"type": "session", "session_id": session.id, "ai_enabled": st.agent.enabled})
             await st.agent.run_turn(session, body.message.strip(), emit)
 
     return sse_response(produce)

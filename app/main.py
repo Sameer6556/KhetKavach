@@ -1,4 +1,4 @@
-"""FastAPI application: wires the database, live-data client, Claude agent, sessions and sentinel together."""
+"""FastAPI application: wires the database, live-data client, AI agent, sessions and sentinel together."""
 
 from __future__ import annotations
 
@@ -7,13 +7,12 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from anthropic import AsyncAnthropic
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .agent.loop import FarmAgent
+from .agent.factory import build_agent
 from .agent.sessions import SessionStore
 from .api.routes import router
 from .config import get_settings
@@ -35,8 +34,7 @@ async def lifespan(app: FastAPI):
     dc = DataClient(db, settings.user_agent, settings.http_timeout_s)
     register_policies(dc)
     ctx = ToolContext(dc=dc, db=db, settings=settings)
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=3, timeout=120.0) if settings.llm_enabled else None
-    agent = FarmAgent(settings, client)
+    agent = build_agent(settings)  # Claude, Gemini, or the rule-based advisor (see KK_LLM_PROVIDER)
     sentinel = Sentinel(ctx, agent)
 
     app.state.settings, app.state.ctx, app.state.agent = settings, ctx, agent
@@ -50,13 +48,12 @@ async def lifespan(app: FastAPI):
         if background:
             background.cancel()
         await dc.aclose()
-        if client is not None:
-            await client.close()
+        await agent.aclose()
         db.close()
 
 
 app = FastAPI(title="KhetKavach", version=__version__, lifespan=lifespan,
-              description="Agentic climate-risk shield for Indian farms, built on live open data and Claude.")
+              description="Agentic climate-risk shield for Indian farms, built on live open data and an LLM agent.")
 app.include_router(router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

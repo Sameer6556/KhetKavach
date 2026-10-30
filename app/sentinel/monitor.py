@@ -2,8 +2,8 @@
 
 For each farm it runs the same live-data tools as the agent, applies alert rules (IMD hazards,
 crop stress, irrigation timing, river flood, nearby disasters), writes each new alert in the
-farmer's language (Claude, verified against the alert facts; template fallback), stores it, and
-pushes it to Telegram when the farm has a chat ID. Alerts are de-duplicated per farm/kind/day.
+farmer's language (the active LLM, verified against the alert facts; template fallback), stores it,
+and pushes it to Telegram when the farm has a chat ID. Alerts are de-duplicated per farm/kind/day.
 """
 
 from __future__ import annotations
@@ -14,12 +14,10 @@ import logging
 from datetime import date
 from typing import Any
 
-import anthropic
-
-from ..agent.loop import FALLBACK_BETA, FarmAgent
-from ..agent.prompts import language_name
-from ..agent.verifier import verify
+from ..agent.base import BaseAgent
 from ..agent.fallback import tool_inputs
+from ..agent.prompts import ALERT_SYSTEM, language_name
+from ..agent.verifier import verify
 from ..evidence import EvidenceLedger
 from ..schemas import FarmProfile
 from ..tools.base import LEVEL_ORDER, ToolContext
@@ -29,9 +27,6 @@ from .notify import send_telegram
 
 log = logging.getLogger(__name__)
 SCAN_TOOLS = ["get_weather_outlook", "get_crop_risk", "get_irrigation_plan", "get_flood_risk", "get_disaster_alerts"]
-ALERT_SYSTEM = ("You write short SMS-style farm alerts for Indian farmers. Use only the facts in <facts>. "
-                "Two or three sentences: what is coming, when, and one concrete action. Units as symbols "
-                "(mm, °C, %, km/h, m³/s), Western digits, no greeting or sign-off.")
 TEMPLATES = {
     "en": "KhetKavach alert ({severity}): {title}.",
     "hi": "खेत कवच चेतावनी ({severity}): {title}।",
@@ -110,7 +105,7 @@ def derive_alerts(runs: dict[str, ToolRun]) -> list[dict[str, Any]]:
 
 
 class Sentinel:
-    def __init__(self, ctx: ToolContext, agent: FarmAgent):
+    def __init__(self, ctx: ToolContext, agent: BaseAgent):
         self.ctx = ctx
         self.agent = agent
         self.last_scan: dict[str, Any] | None = None
@@ -162,25 +157,14 @@ class Sentinel:
 
     async def compose(self, alert: dict[str, Any], language: str) -> str:
         template = TEMPLATES.get(language, TEMPLATES["en"]).format(severity=alert["severity"], title=alert["title"])
-        client = self.agent.client
-        if client is None:
-            return template
         facts = json.dumps(alert["facts"], ensure_ascii=False, default=str)
+        prompt = f"Language: {language_name(language)}\nAlert: {alert['title']}\n<facts>{facts}</facts>"
         try:
-            msg = await client.beta.messages.create(
-                model=self.ctx.settings.model, max_tokens=2048, system=ALERT_SYSTEM,
-                output_config={"effort": "low"}, betas=[FALLBACK_BETA], fallbacks="default",
-                messages=[{"role": "user", "content": f"Language: {language_name(language)}\n"
-                                                      f"Alert: {alert['title']}\n<facts>{facts}</facts>"}],
-            )
-        except anthropic.APIError as exc:
-            log.info("Alert wording fell back to template: %s", type(exc).__name__)
-            return template
+            text = await self.agent.write_short(ALERT_SYSTEM, prompt)
         except Exception:  # wording is a nicety: never let it block an alert
             log.exception("Alert wording failed; using template")
             return template
-        text = "".join(b.text for b in msg.content if b.type == "text").strip()
-        if msg.stop_reason == "refusal" or not text:
+        if not text:
             return template
         ledger = EvidenceLedger()
         ledger.add("alert_facts", alert["facts"] | {"title": alert["title"]}, [])
