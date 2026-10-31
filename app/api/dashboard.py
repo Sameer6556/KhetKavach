@@ -13,7 +13,7 @@ from ..tools.registry import ToolExecutor, ToolRun
 Emit = Callable[[dict[str, Any]], Awaitable[None]]
 
 SECTIONS = ["get_location_context", "get_weather_outlook", "get_crop_risk", "get_irrigation_plan",
-            "get_spray_windows", "get_climate_anomaly", "get_flood_risk", "get_soil_profile",
+            "get_field_diary", "get_spray_windows", "get_climate_anomaly", "get_flood_risk", "get_soil_profile",
             "get_mandi_prices", "get_disaster_alerts", "get_air_quality", "get_satellite_crop_health"]
 
 

@@ -386,6 +386,10 @@ class ScriptedClaude:
                 outer.requests.append(kwargs)
                 return outer.script[min(len(outer.requests) - 1, len(outer.script) - 1)](kwargs["messages"])
 
+            async def parse(self, **kwargs: Any) -> Any:
+                outer.requests.append(kwargs)
+                return outer.script[min(len(outer.requests) - 1, len(outer.script) - 1)](kwargs["messages"])
+
         class _Beta:
             messages = _Messages()
 

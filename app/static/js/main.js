@@ -7,6 +7,7 @@ import { renderSection, renderSummary, startDashboard } from './dashboard.js';
 import { ask, initChat, renderSuggestions, resetConversation } from './chat.js';
 import { initSentinel, refreshSentinel } from './sentinel.js';
 import { canListen, listen } from './voice.js';
+import { initDiary, refreshDiary } from './diary.js';
 
 const $ = (sel) => document.querySelector(sel);
 const state = { meta: null, lat: null, lon: null, place: '', sessionId: null, lang: 'en', dashboardRun: null };
@@ -31,6 +32,7 @@ function farmProfile() {
     lat: state.lat, lon: state.lon, crop: $('#crop').value, sowing_date: $('#sowing-date').value,
     irrigation_method: $('#irrigation').value, last_irrigation_date: $('#last-irrigation').value || null,
     language: state.lang, place: state.place || null,
+    area_acres: Number($('#area').value) > 0 ? Number($('#area').value) : null,
   };
 }
 
@@ -107,6 +109,7 @@ function selectTab(name) {
   });
   document.querySelectorAll('.tab-panel').forEach((p) => { p.hidden = p.id !== `panel-${name}`; });
   if (name === 'sentinel') refreshSentinel();
+  if (name === 'diary') refreshDiary(farmProfile());
   invalidate();
 }
 
@@ -208,6 +211,7 @@ async function boot() {
   $('#sowing-date').value = saved?.sowing_date || isoDaysAgo(20);
   $('#irrigation').value = saved?.irrigation_method || 'flood';
   $('#last-irrigation').value = saved?.last_irrigation_date || '';
+  $('#area').value = saved?.area_acres || '';
   setLanguage(lang);
 
   if (saved && typeof saved.lat === 'number') {
@@ -219,12 +223,21 @@ async function boot() {
 
   $('#language').addEventListener('change', (e) => setLanguage(e.target.value));
   $('#farm-form').addEventListener('submit', (e) => { e.preventDefault(); analyse(); });
-  ['#crop', '#sowing-date', '#irrigation', '#last-irrigation'].forEach((sel) => $(sel).addEventListener('change', () => { newConversation(); persist(); }));
+  ['#crop', '#sowing-date', '#irrigation', '#last-irrigation', '#area'].forEach((sel) => $(sel).addEventListener('change', () => { newConversation(); persist(); }));
+  document.addEventListener('click', (e) => { const go = e.target.closest('[data-goto]'); if (go) selectTab(go.dataset.goto); });
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => selectTab(b.dataset.tab)));
   initSearch();
   initMic();
   initChat(chatContext);
   initSentinel(farmProfile);
+  initDiary(farmProfile, (day) => {
+    // A newer irrigation date from the check-in feeds the water balance in the dashboard and chat.
+    if ($('#last-irrigation').value && $('#last-irrigation').value >= day) return false;
+    $('#last-irrigation').value = day;
+    newConversation();
+    persist();
+    return true;
+  });
   pollHealth();
   setInterval(pollHealth, 60000);
 }

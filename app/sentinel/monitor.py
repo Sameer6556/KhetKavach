@@ -18,6 +18,7 @@ from ..agent.base import BaseAgent
 from ..agent.fallback import tool_inputs
 from ..agent.prompts import ALERT_SYSTEM, language_name
 from ..agent.verifier import verify
+from ..diary.service import CHECK_IN_INTERVAL_DAYS, diary_summary
 from ..evidence import EvidenceLedger
 from ..schemas import FarmProfile
 from ..tools.base import LEVEL_ORDER, ToolContext
@@ -41,10 +42,12 @@ def _ok(run: ToolRun | None) -> bool:
     return bool(run and run.ok and run.output)
 
 
-def derive_alerts(runs: dict[str, ToolRun]) -> list[dict[str, Any]]:
-    """Alert rules over tool outputs. Pure function (unit-tested)."""
+def derive_alerts(runs: dict[str, ToolRun], diary: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Alert rules over tool outputs and the farm's recent diary entries. Pure function (unit-tested)."""
     alerts: list[dict[str, Any]] = []
     today = date.today().isoformat()
+    if diary is not None:
+        alerts += diary_alerts(diary)
 
     w = runs.get("get_weather_outlook")
     if _ok(w):
@@ -104,6 +107,25 @@ def derive_alerts(runs: dict[str, ToolRun]) -> list[dict[str, Any]]:
     return alerts
 
 
+def diary_alerts(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A weekly photo reminder, and a scouting alert when the latest photo shows a likely symptom."""
+    year, week, _ = date.today().isocalendar()
+    latest = entries[0] if entries else None
+    last_day = latest["created_at"][:10] if latest else None
+    if latest is None or -_days_until(last_day) >= CHECK_IN_INTERVAL_DAYS:
+        return [{"kind": "diary_reminder", "valid_for": f"{year}-W{week:02d}", "severity": "info",
+                 "title": "Time for this week's crop photo",
+                 "facts": {"last_check_in": last_day, "how": "Field diary tab: one photo of the crop and a few taps"}}]
+    likely = [s for s in (latest.get("analysis") or {}).get("symptoms", []) if s.get("likelihood") == "high"]
+    if likely:
+        sym = likely[0]
+        return [{"kind": f"photo_symptom:{latest['id']}", "valid_for": last_day, "severity": "moderate",
+                 "title": f"Photo check: possible {sym['name']} ({sym['where']}); scout the field",
+                 "facts": {"symptom": sym, "photo_date": last_day,
+                           "note": "AI visual estimate from the farmer's photo, not a diagnosis"}}]
+    return []
+
+
 class Sentinel:
     def __init__(self, ctx: ToolContext, agent: BaseAgent):
         self.ctx = ctx
@@ -113,13 +135,17 @@ class Sentinel:
     async def scan_farm(self, farm_row: dict[str, Any]) -> list[dict[str, Any]]:
         farm = FarmProfile(lat=farm_row["lat"], lon=farm_row["lon"], crop=farm_row["crop"],
                            sowing_date=farm_row["sowing_date"], irrigation_method=farm_row["irrigation"],
-                           language=farm_row["language"])
-        executor = ToolExecutor(self.ctx, EvidenceLedger(), farm.lat, farm.lon)
+                           language=farm_row["language"], area_acres=farm_row.get("area_acres"))
+        diary = diary_summary(self.ctx.db, farm, limit=2)
+        reported = diary["data"].get("last_irrigation_reported")  # the farmer's own check-ins keep the balance accurate
+        if reported:
+            farm = farm.model_copy(update={"last_irrigation_date": date.fromisoformat(reported)})
+        executor = ToolExecutor(self.ctx, EvidenceLedger(), farm=farm)
         inputs = tool_inputs(farm, SCAN_TOOLS)
         inputs["get_disaster_alerts"]["radius_km"] = 300
         runs = await asyncio.gather(*(executor.run(n, inputs[n]) for n in SCAN_TOOLS))
         created = []
-        for alert in derive_alerts({r.name: r for r in runs}):
+        for alert in derive_alerts({r.name: r for r in runs}, diary["rows"]):
             alert["message"] = await self.compose(alert, farm.language)
             row = self.ctx.db.insert_alert({**alert, "farm_id": farm_row["id"]})
             if row is None:

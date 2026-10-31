@@ -14,6 +14,7 @@ Every step is streamed to the UI. History is append-only: thinking blocks are pa
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from typing import Any
@@ -22,9 +23,10 @@ import anthropic
 from anthropic import AsyncAnthropic
 
 from ..config import Settings
+from ..diary.models import PhotoFindings
 from ..tools.registry import tool_schemas
 from .base import MAX_REVISIONS, AIUnavailable, BaseAgent, Emit, Usage
-from .prompts import REFUSAL_TEXT, SYSTEM_PROMPT, verifier_feedback
+from .prompts import REFUSAL_TEXT, SYSTEM_PROMPT, VISION_SYSTEM, verifier_feedback
 from .sessions import ChatSession
 from .verifier import verify
 
@@ -165,6 +167,30 @@ class ClaudeAgent(BaseAgent):
         if msg.stop_reason == "refusal":
             return None
         return "".join(b.text for b in msg.content if b.type == "text").strip() or None
+
+    async def analyze_photo(self, photos: list[bytes], prompt: str) -> PhotoFindings | None:
+        if self.client is None:
+            return None
+        content: list[dict[str, Any]] = [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                         "data": base64.standard_b64encode(p).decode("ascii")}} for p in photos]
+        content.append({"type": "text", "text": prompt})
+        kwargs: dict[str, Any] = {"model": self.settings.model, "max_tokens": 4096, "system": VISION_SYSTEM,
+                                  "output_format": PhotoFindings, "output_config": {"effort": "low"},
+                                  "messages": [{"role": "user", "content": content}]}
+        if not self._compat:
+            kwargs.update(betas=[FALLBACK_BETA], fallbacks="default")
+        try:
+            msg = await self.client.beta.messages.parse(**kwargs)
+        except anthropic.APIError as exc:
+            log.info("Photo analysis unavailable: %s", type(exc).__name__)
+            return None
+        except ValueError:  # the structured output did not validate
+            log.warning("Photo analysis returned invalid JSON")
+            return None
+        if msg.stop_reason in ("refusal", "max_tokens"):
+            return None
+        return msg.parsed_output
 
     async def aclose(self) -> None:
         if self.client is not None and hasattr(self.client, "close"):

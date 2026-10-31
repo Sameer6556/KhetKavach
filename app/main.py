@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .agent.factory import build_agent
 from .agent.sessions import SessionStore
+from .api.diary import router as diary_router
 from .api.routes import router
 from .config import get_settings
 from .db import Database
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="KhetKavach", version=__version__, lifespan=lifespan,
               description="Agentic climate-risk shield for Indian farms, built on live open data and an LLM agent.")
 app.include_router(router)
+app.include_router(diary_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

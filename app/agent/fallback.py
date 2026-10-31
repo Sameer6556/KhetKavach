@@ -19,13 +19,13 @@ TITLES = {
     "en": {"get_weather_outlook": "Weather (7 days)", "get_crop_risk": "Crop risk", "get_irrigation_plan": "Irrigation",
            "get_spray_windows": "Spraying", "get_flood_risk": "River flood", "get_mandi_prices": "Mandi prices",
            "get_satellite_crop_health": "Satellite crop health", "get_disaster_alerts": "Disaster alerts",
-           "get_climate_anomaly": "Rainfall vs normal",
+           "get_climate_anomaly": "Rainfall vs normal", "get_field_diary": "Field diary",
            "intro": "Rule-based advisory from live data (AI assistant unavailable: {reason}).",
            "priority": "Top priority", "unavailable": "data unavailable right now"},
     "hi": {"get_weather_outlook": "मौसम (7 दिन)", "get_crop_risk": "फसल जोखिम", "get_irrigation_plan": "सिंचाई",
            "get_spray_windows": "छिड़काव", "get_flood_risk": "नदी बाढ़", "get_mandi_prices": "मंडी भाव",
            "get_satellite_crop_health": "उपग्रह से फसल स्वास्थ्य", "get_disaster_alerts": "आपदा चेतावनी",
-           "get_climate_anomaly": "सामान्य से तुलना",
+           "get_climate_anomaly": "सामान्य से तुलना", "get_field_diary": "खेत डायरी",
            "intro": "लाइव डेटा पर आधारित नियम-आधारित सलाह (AI सहायक उपलब्ध नहीं: {reason})।",
            "priority": "सबसे ज़रूरी", "unavailable": "डेटा अभी उपलब्ध नहीं"},
 }
@@ -36,7 +36,7 @@ KEYWORDS = {
     "get_disaster_alerts": ("cyclone", "earthquake", "disaster", "तूफान", "चक्रवात", "आपदा"),
     "get_climate_anomaly": ("normal", "drought", "deficit", "सूखा", "सामान्य"),
 }
-CORE_TOOLS = ["get_weather_outlook", "get_crop_risk", "get_irrigation_plan", "get_spray_windows"]
+CORE_TOOLS = ["get_weather_outlook", "get_crop_risk", "get_irrigation_plan", "get_spray_windows", "get_field_diary"]
 
 
 def tool_inputs(farm: Any, names: list[str]) -> dict[str, dict[str, Any]]:
@@ -46,13 +46,15 @@ def tool_inputs(farm: Any, names: list[str]) -> dict[str, dict[str, Any]]:
         "get_weather_outlook": {**base, "days": 7},
         "get_crop_risk": crop,
         "get_irrigation_plan": {**crop, "irrigation_method": farm.irrigation_method,
-                                "last_irrigation_date": farm.last_irrigation_date.isoformat() if farm.last_irrigation_date else None},
+                                "last_irrigation_date": farm.last_irrigation_date.isoformat() if farm.last_irrigation_date else None,
+                                "area_acres": getattr(farm, "area_acres", None)},
         "get_spray_windows": {**base, "hours": 72},
         "get_flood_risk": base,
         "get_mandi_prices": {"commodity": farm.crop},
         "get_satellite_crop_health": base,
         "get_disaster_alerts": {**base, "radius_km": 500},
         "get_climate_anomaly": base,
+        "get_field_diary": {"weeks": 4},
     }
     return {n: table[n] for n in names}
 

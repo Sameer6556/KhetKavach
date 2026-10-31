@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS farms (
     irrigation       TEXT NOT NULL DEFAULT 'flood',
     language         TEXT NOT NULL DEFAULT 'en',
     telegram_chat_id TEXT,
+    area_acres       REAL,
     created_at       TEXT NOT NULL
 );
 
@@ -49,6 +50,20 @@ CREATE TABLE IF NOT EXISTS alerts (
     created_at  TEXT NOT NULL,
     UNIQUE (farm_id, kind, valid_for)
 );
+
+CREATE TABLE IF NOT EXISTS diary_entries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    farm_key        TEXT NOT NULL,
+    token           TEXT NOT NULL UNIQUE,
+    created_at      TEXT NOT NULL,
+    observations    TEXT NOT NULL,
+    analysis        TEXT,
+    analysis_status TEXT NOT NULL,
+    photo           BLOB,
+    photo_width     INTEGER,
+    photo_height    INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_diary_farm ON diary_entries (farm_key, id);
 
 CREATE TABLE IF NOT EXISTS mandi_prices (
     arrival_date TEXT NOT NULL,
@@ -83,7 +98,14 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a database file was first created."""
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(farms)")}
+        if "area_acres" not in columns:
+            self._conn.execute("ALTER TABLE farms ADD COLUMN area_acres REAL")
 
     def close(self) -> None:
         with self._lock:
@@ -116,9 +138,11 @@ class Database:
     def add_farm(self, farm: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             cur = self._conn.execute(
-                """INSERT INTO farms (name, lat, lon, crop, sowing_date, irrigation, language, telegram_chat_id, created_at)
-                   VALUES (:name, :lat, :lon, :crop, :sowing_date, :irrigation, :language, :telegram_chat_id, :created_at)""",
-                {**farm, "created_at": utcnow_iso()},
+                """INSERT INTO farms (name, lat, lon, crop, sowing_date, irrigation, language, telegram_chat_id,
+                                      area_acres, created_at)
+                   VALUES (:name, :lat, :lon, :crop, :sowing_date, :irrigation, :language, :telegram_chat_id,
+                           :area_acres, :created_at)""",
+                {"area_acres": None, **farm, "created_at": utcnow_iso()},
             )
             self._conn.commit()
             row = self._conn.execute("SELECT * FROM farms WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -171,6 +195,49 @@ class Database:
             rows = self._conn.execute(query, (*args, limit)).fetchall()
         return [_alert_row(r) for r in rows]
 
+    # ------------------------------------------------------------------ field diary
+    def add_diary_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            cur = self._conn.execute(
+                """INSERT INTO diary_entries (farm_key, token, created_at, observations, analysis, analysis_status,
+                                              photo, photo_width, photo_height)
+                   VALUES (:farm_key, :token, :created_at, :observations, :analysis, :analysis_status,
+                           :photo, :photo_width, :photo_height)""",
+                {**entry, "created_at": utcnow_iso(),
+                 "observations": json.dumps(entry["observations"], ensure_ascii=False),
+                 "analysis": json.dumps(entry["analysis"], ensure_ascii=False) if entry.get("analysis") else None},
+            )
+            self._conn.commit()
+            row = self._conn.execute(f"SELECT {_DIARY_COLUMNS} FROM diary_entries WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return _diary_row(row)
+
+    def list_diary(self, farm_key: str, limit: int = 12) -> list[dict[str, Any]]:
+        """Newest first, without photo bytes."""
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT {_DIARY_COLUMNS} FROM diary_entries WHERE farm_key = ? ORDER BY id DESC LIMIT ?",
+                (farm_key, limit)).fetchall()
+        return [_diary_row(r) for r in rows]
+
+    def latest_diary_photo(self, farm_key: str) -> tuple[bytes, str] | None:
+        """(jpeg, created_at) of the most recent entry that has a photo."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT photo, created_at FROM diary_entries WHERE farm_key = ? AND photo IS NOT NULL ORDER BY id DESC LIMIT 1",
+                (farm_key,)).fetchone()
+        return (bytes(row["photo"]), row["created_at"]) if row else None
+
+    def diary_photo(self, token: str) -> bytes | None:
+        with self._lock:
+            row = self._conn.execute("SELECT photo FROM diary_entries WHERE token = ?", (token,)).fetchone()
+        return bytes(row["photo"]) if row and row["photo"] is not None else None
+
+    def delete_diary_entry(self, token: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM diary_entries WHERE token = ?", (token,))
+            self._conn.commit()
+            return cur.rowcount > 0
+
     # ------------------------------------------------------------------ mandi history
     def upsert_mandi_prices(self, records: list[dict[str, Any]]) -> None:
         if not records:
@@ -200,4 +267,16 @@ class Database:
 def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
     out = dict(row)
     out["facts"] = json.loads(out["facts"])
+    return out
+
+
+_DIARY_COLUMNS = ("id, farm_key, token, created_at, observations, analysis, analysis_status, photo_width, photo_height, "
+                  "photo IS NOT NULL AS has_photo")
+
+
+def _diary_row(row: sqlite3.Row) -> dict[str, Any]:
+    out = dict(row)
+    out["observations"] = json.loads(out["observations"])
+    out["analysis"] = json.loads(out["analysis"]) if out["analysis"] else None
+    out["has_photo"] = bool(out["has_photo"])
     return out

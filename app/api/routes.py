@@ -141,7 +141,7 @@ async def reverse(request: Request, lat: float = Query(ge=-90, le=90), lon: floa
 async def dashboard(request: Request, farm: FarmProfile) -> StreamingResponse:
     if not dashboard_limiter.allow(_client_ip(request)):
         raise HTTPException(429, "Too many analyses from this address; please wait a few minutes.")
-    executor = ToolExecutor(request.app.state.ctx, EvidenceLedger(), farm.lat, farm.lon)
+    executor = ToolExecutor(request.app.state.ctx, EvidenceLedger(), farm=farm)
     return sse_response(lambda emit: stream_dashboard(executor, farm, emit))
 
 
@@ -172,7 +172,8 @@ async def create_farm(request: Request, farm: FarmCreate) -> dict[str, Any]:
         raise HTTPException(409, "Farm registry is full on this demo server.")
     row = db.add_farm({"name": farm.name, "lat": farm.lat, "lon": farm.lon, "crop": farm.crop,
                        "sowing_date": farm.sowing_date.isoformat(), "irrigation": farm.irrigation_method,
-                       "language": farm.language, "telegram_chat_id": farm.telegram_chat_id})
+                       "language": farm.language, "telegram_chat_id": farm.telegram_chat_id,
+                       "area_acres": farm.area_acres})
     return row
 
 

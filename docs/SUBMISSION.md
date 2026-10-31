@@ -35,6 +35,10 @@ languages, by voice. It:
 A deterministic grounding verifier then checks every data figure in the answer against the evidence and triggers one self-correction
 if anything is untraceable.
 
+A weekly **field diary** makes the advice personal. The farmer sends one crop photo and a few taps (leaf colour, pests seen,
+irrigation/spray/fertiliser dates). The AI compares it with last week's photo and returns structured findings (stage seen vs
+expected, canopy cover, possible symptoms with a likelihood, what to check), which the agent then uses as cited evidence.
+
 An autonomous Sentinel re-analyses registered farms every few hours and pushes de-duplicated alerts in the farmer's language to
 Telegram. If the LLM is unavailable, a rule-based advisor answers from the same live data.
 

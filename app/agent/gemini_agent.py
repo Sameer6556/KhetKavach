@@ -23,9 +23,10 @@ import httpx
 from google.genai import errors, types
 
 from ..config import Settings
+from ..diary.models import PhotoFindings
 from ..tools.registry import TOOLS, ToolSpec
 from .base import MAX_REVISIONS, AIUnavailable, BaseAgent, Emit, Usage
-from .prompts import REFUSAL_TEXT, SYSTEM_PROMPT, verifier_feedback
+from .prompts import REFUSAL_TEXT, SYSTEM_PROMPT, VISION_SYSTEM, verifier_feedback
 from .sessions import ChatSession
 from .verifier import verify
 
@@ -68,6 +69,14 @@ def declaration(spec: ToolSpec) -> types.FunctionDeclaration:
 
 def _jsonable(payload: dict[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(payload, ensure_ascii=False, default=str))
+
+
+def _answer_text(response: types.GenerateContentResponse | None) -> str | None:
+    """Visible (non-thought) text of a response, or None if it is missing or blocked."""
+    candidate = response.candidates[0] if response is not None and response.candidates else None
+    if candidate is None or candidate.finish_reason in BLOCKED or not candidate.content or not candidate.content.parts:
+        return None
+    return "".join(p.text for p in candidate.content.parts if p.text and not p.thought).strip() or None
 
 
 def _describe(exc: errors.APIError, model: str) -> str:
@@ -193,19 +202,42 @@ class GeminiAgent(BaseAgent):
                 usage.add()
             return response
 
-    async def write_short(self, system: str, prompt: str) -> str | None:
+    async def _simple(self, contents: Any, config: types.GenerateContentConfig) -> types.GenerateContentResponse | None:
+        """A single tool-free request (with the model fallback chain); None when Gemini is unavailable."""
         if self.client is None:
             return None
+        while True:
+            try:
+                return await self.client.aio.models.generate_content(model=self.model, contents=contents, config=config)
+            except errors.ClientError as exc:
+                if exc.code == 404 and self._model_index + 1 < len(self._models):
+                    self._model_index += 1
+                    continue
+                log.info("Gemini request unavailable: %s", _describe(exc, self.model))
+                return None
+            except (errors.APIError, httpx.HTTPError) as exc:
+                log.info("Gemini request unavailable: %s", type(exc).__name__)
+                return None
+
+    async def write_short(self, system: str, prompt: str) -> str | None:
+        response = await self._simple(prompt, types.GenerateContentConfig(system_instruction=system))
+        return _answer_text(response)
+
+    async def analyze_photo(self, photos: list[bytes], prompt: str) -> PhotoFindings | None:
+        parts = [types.Part.from_bytes(data=p, mime_type="image/jpeg") for p in photos] + [types.Part(text=prompt)]
+        config = types.GenerateContentConfig(system_instruction=VISION_SYSTEM, response_mime_type="application/json",
+                                             response_schema=PhotoFindings)
+        response = await self._simple([types.Content(role="user", parts=parts)], config)
+        if response is not None and isinstance(response.parsed, PhotoFindings):
+            return response.parsed
+        text = _answer_text(response)
+        if not text:
+            return None
         try:
-            response = await self.client.aio.models.generate_content(
-                model=self.model, contents=prompt, config=types.GenerateContentConfig(system_instruction=system))
-        except (errors.APIError, httpx.HTTPError) as exc:
-            log.info("Short completion unavailable: %s", type(exc).__name__)
+            return PhotoFindings.model_validate_json(text)
+        except ValueError:
+            log.warning("Gemini photo analysis returned invalid JSON")
             return None
-        candidate = response.candidates[0] if response.candidates else None
-        if candidate is None or candidate.finish_reason in BLOCKED or not candidate.content or not candidate.content.parts:
-            return None
-        return "".join(p.text for p in candidate.content.parts if p.text and not p.thought).strip() or None
 
     async def aclose(self) -> None:
         aio = getattr(self.client, "aio", None)

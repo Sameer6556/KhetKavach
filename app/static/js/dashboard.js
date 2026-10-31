@@ -7,6 +7,7 @@ import { showDisasterEvents, showRiverCell } from './map.js';
 const grid = () => document.getElementById('dash-grid');
 const charts = new Map();
 const WIDE = new Set(['get_weather_outlook', 'get_irrigation_plan']);
+const LIKELIHOOD_LEVEL = { low: 'low', medium: 'moderate', high: 'high' };
 
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -192,6 +193,22 @@ const R = {
           options: { plugins: { legend: { labels: { filter: (item) => item.text !== 'p25' } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'm³/s' } } } },
         });
       },
+    };
+  },
+
+  get_field_diary(d, chart) {
+    const latest = ((chart && chart.entries) || [])[0];
+    const add = `<button type="button" class="btn btn-ghost" data-goto="diary">📷 ${esc(t('diary_add'))}</button>`;
+    if (!latest) return { html: `<p>${esc(t('diary_empty'))}</p>${add}` };
+    const symptoms = (latest.symptoms || []).map((s) => `<li>${levelChip(LIKELIHOOD_LEVEL[s.likelihood] || 'info')} ${esc(s.name)} <span class="muted">(${esc(s.where)})</span></li>`).join('');
+    return {
+      html: `<div class="diary-card${latest.photo_url ? '' : ' no-photo'}">`
+        + (latest.photo_url ? `<img class="diary-thumb" src="${esc(latest.photo_url)}" alt="Latest crop photo">` : '')
+        + `<div>${facts([[t('stage_seen'), latest.stage && latest.stage !== 'unsure' ? esc(latest.stage) : null],
+          [t('canopy'), latest.canopy != null ? `~${latest.canopy}%` : null],
+          [t('stage_expected'), esc(d.expected_stage_from_sowing_date || '')],
+          [t('diary_due'), d.next_check_in_due ? shortDate(d.next_check_in_due) : null]])}`
+        + (latest.summary ? `<p>${esc(latest.summary)}</p>` : '') + (symptoms ? `<ul>${symptoms}</ul>` : '') + `</div></div>${add}`,
     };
   },
 

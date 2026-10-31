@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from pydantic import BaseModel, ValidationError
 
@@ -14,8 +14,11 @@ from ..evidence import Evidence, EvidenceLedger
 from ..http import SourceError
 from ..sources import nominatim
 from . import farm_tools as ft
-from .base import (AlertArgs, CropArgs, GeocodeArgs, IrrigationArgs, LatLon, MandiArgs, OutlookArgs, SprayArgs,
-                   ToolContext, ToolError, ToolOutput)
+from .base import (AlertArgs, CropArgs, DiaryArgs, GeocodeArgs, IrrigationArgs, LatLon, MandiArgs, OutlookArgs,
+                   SprayArgs, ToolContext, ToolError, ToolOutput)
+
+if TYPE_CHECKING:
+    from ..schemas import FarmProfile
 
 log = logging.getLogger(__name__)
 TOOL_TIMEOUT_S = 90
@@ -27,6 +30,7 @@ class ToolSpec:
     description: str
     input_model: type[BaseModel]
     func: Callable[..., Awaitable[ToolOutput]]
+    needs: str | None = None  # extra context passed to func: "place" (farm's district/state) or "farm" (profile)
 
     def schema(self) -> dict[str, Any]:
         js = _strip_titles(self.input_model.model_json_schema())
@@ -86,7 +90,7 @@ TOOLS: list[ToolSpec] = [
              "Today's Agmarknet wholesale prices (Rs/quintal) for a commodity across the state's mandis, the farm's local "
              "markets, the best market and the price gap. If the commodity is not found, the error lists the "
              "commodities reported today so you can retry with the right name.",
-             MandiArgs, ft.get_mandi_prices),
+             MandiArgs, ft.get_mandi_prices, needs="place"),
     ToolSpec("get_disaster_alerts",
              "Active GDACS disaster events (cyclones, floods, earthquakes, droughts, wildfires) within a radius of the farm.",
              AlertArgs, ft.get_disaster_alerts),
@@ -100,6 +104,11 @@ TOOLS: list[ToolSpec] = [
     ToolSpec("geocode_place",
              "Find coordinates for a village/town/district name the user mentions (India first, then worldwide).",
              GeocodeArgs, ft.geocode_place),
+    ToolSpec("get_field_diary",
+             "The farmer's own weekly field diary: crop photos analysed by AI (growth stage seen, canopy cover, leaf colour, "
+             "water stress, weeds, possible symptoms with likelihood) plus their observations (pests seen, irrigation, spray "
+             "and fertiliser dates, notes), and the change since the previous photo. Use it to personalise advice.",
+             DiaryArgs, ft.get_field_diary, needs="farm"),
 ]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 
@@ -126,10 +135,11 @@ class ToolExecutor:
     """Runs tools for one conversation; owns the evidence ledger and the farm's default place."""
 
     def __init__(self, ctx: ToolContext, ledger: EvidenceLedger, farm_lat: float | None = None,
-                 farm_lon: float | None = None):
+                 farm_lon: float | None = None, farm: FarmProfile | None = None):
         self.ctx = ctx
         self.ledger = ledger
-        self._farm = (farm_lat, farm_lon)
+        self.farm = farm
+        self._farm = (farm.lat, farm.lon) if farm is not None else (farm_lat, farm_lon)
         self._place: dict[str, Any] | None = None
 
     async def default_place(self) -> dict[str, Any] | None:
@@ -156,8 +166,10 @@ class ToolExecutor:
             return done(ok=False, error={"message": "Invalid tool input", "problems": problems,
                                          "hint": "Fix the listed fields and call the tool again."})
         try:
-            if spec.func is ft.get_mandi_prices:
+            if spec.needs == "place":
                 coro = spec.func(self.ctx, args, await self.default_place())
+            elif spec.needs == "farm":
+                coro = spec.func(self.ctx, args, self.farm)
             else:
                 coro = spec.func(self.ctx, args)
             output: ToolOutput = await asyncio.wait_for(coro, timeout=TOOL_TIMEOUT_S)

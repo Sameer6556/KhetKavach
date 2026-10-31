@@ -79,6 +79,22 @@ Every `KK_SENTINEL_INTERVAL_MIN` minutes, or when `POST /api/sentinel/scan` is c
    template is used instead.
 4. Insert alerts with a `UNIQUE(farm, kind, day)` constraint, so repeated sweeps don't spam the farmer. New alerts are pushed to Telegram.
 
+### 2.5 Field diary check-in (`POST /api/diary`)
+
+1. The browser shrinks the photo to 1280 px and re-encodes it, which drops the phone's EXIF and GPS data, then posts it with the farm
+   profile and the quick observations (leaf colour, pests seen, irrigation, spray and fertiliser dates, a note).
+2. The server validates the image, applies the camera rotation, resizes it to 1024 px and re-encodes it without metadata.
+3. If an AI key is set, the photo is analysed with last week's photo beside it.
+   * The model must return the `PhotoFindings` schema: stage seen, canopy cover, leaf colour, water stress, weeds, symptoms with a
+     likelihood, change since last photo, a summary and field checks in the farmer's language.
+   * Gemini uses `response_schema`; Claude uses structured output.
+   * The prompt forbids diagnoses, pesticide names and doses.
+4. The entry is saved even if analysis fails or no AI is configured: the farmer's own observations still count.
+5. From then on:
+   * `get_field_diary` gives the agent the recent check-ins and the week-over-week change as evidence.
+   * The reported irrigation date feeds the water balance, in the UI immediately and in Sentinel's sweep.
+   * Sentinel sends a weekly photo reminder and a scouting alert when the latest photo shows a high-likelihood symptom.
+
 ## 3. The grounding verifier (`app/agent/verifier.py`)
 
 * Normalises Indic digits (Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Tamil, Telugu, Kannada, Malayalam) to ASCII.
@@ -108,6 +124,8 @@ The prompt also forbids computing new numbers. Tools pre-compute totals, gaps, p
 | Gemini model rejects thinking config | `ClientError` 400 | One retry without `thinking_config` |
 | Safety decline | Claude `refusal` / Gemini `SAFETY` finish | Claude: server-side fallback model; both: a polite redirect |
 | LLM unreachable / bad key / rate limit (e.g. Gemini free tier) / timeout | `AIUnavailable` | Turn rolled back; rule-based advisor answers from live tools |
+| Photo unusable (not an image, too big) | Pillow / size check | HTTP 413/422 with a clear message; nothing stored |
+| Photo analysis fails or no AI key | `analyze_photo` returns None | Check-in saved with the farmer's observations; marked "not analysed" |
 | Client disconnects mid-turn | `CancelledError` | Turn rolled back; session stays valid |
 | Abuse of the public URL | per-IP sliding window | HTTP 429 with a friendly message |
 

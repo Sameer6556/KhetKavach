@@ -22,6 +22,7 @@ class FarmProfile(BaseModel):
     last_irrigation_date: date | None = None
     language: str = "en"
     place: str | None = Field(None, max_length=160)
+    area_acres: float | None = Field(None, gt=0, le=10000, description="Field size in acres (optional)")
 
     @field_validator("crop")
     @classmethod
@@ -52,8 +53,13 @@ class FarmProfile(BaseModel):
         return v if v in LANGUAGES else "en"
 
     def key(self) -> tuple:
+        """Identity of a chat session: any change starts a fresh conversation."""
         return (round(self.lat, 4), round(self.lon, 4), self.crop, self.sowing_date, self.irrigation_method,
-                self.last_irrigation_date, self.language)
+                self.last_irrigation_date, self.language, self.area_acres)
+
+    def farm_key(self) -> str:
+        """Identity of the field for its diary: same place (~100 m), crop and sowing date."""
+        return f"{self.lat:.3f}:{self.lon:.3f}:{self.crop}:{self.sowing_date.isoformat()}"
 
 
 class ChatRequest(BaseModel):

@@ -15,6 +15,7 @@ export const TOOL_META = {
   get_air_quality: { icon: '🌫️', label: 'Air quality' },
   get_satellite_crop_health: { icon: '🛰️', label: 'Satellite crop vigour' },
   geocode_place: { icon: '🔎', label: 'Place search' },
+  get_field_diary: { icon: '📔', label: 'Field diary' },
 };
 
 export function toolLabel(name) {

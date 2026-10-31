@@ -10,16 +10,17 @@ from __future__ import annotations
 import asyncio
 import math
 import statistics
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from ..agronomy import climate, hydrology, soil, spray, stress
 from ..agronomy.crops import CROPS, IRRIGATION_EFFICIENCY, get_crop
 from ..agronomy.water import LITRES_PER_MM_PER_ACRE, crop_stage, run_water_balance, wind_10m_to_2m
+from ..diary.service import diary_summary
 from ..http import SourceError
 from ..sources import gdacs, mandi, nominatim, open_meteo, sentinel2, soilgrids
-from .base import (AlertArgs, CropArgs, GeocodeArgs, IrrigationArgs, LatLon, MandiArgs, OutlookArgs, SprayArgs,
-                   ToolContext, ToolError, ToolOutput, worst_level)
+from .base import (AlertArgs, CropArgs, DiaryArgs, GeocodeArgs, IrrigationArgs, LatLon, MandiArgs, OutlookArgs,
+                   SprayArgs, ToolContext, ToolError, ToolOutput, worst_level)
 
 WMO_CODES = {
     0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast", 45: "fog", 48: "rime fog",
@@ -373,6 +374,13 @@ async def get_irrigation_plan(ctx: ToolContext, args: IrrigationArgs) -> ToolOut
     if plan.deferrals and IRRIGATION_EFFICIENCY.get(args.irrigation_method):
         saved = plan.deferrals[0]["deficit_mm"] / IRRIGATION_EFFICIENCY[args.irrigation_method]
         data["water_saved_by_waiting_for_rain_litres_per_acre"] = round(saved * LITRES_PER_MM_PER_ACRE, -2)
+    if args.area_acres:
+        data["field_size_acres"] = args.area_acres
+        if plan.next_irrigation and plan.next_irrigation.get("litres_per_acre"):
+            plan.next_irrigation["litres_for_field"] = round(plan.next_irrigation["litres_per_acre"] * args.area_acres, -2)
+        if "water_saved_by_waiting_for_rain_litres_per_acre" in data:
+            data["water_saved_for_field_litres"] = round(
+                data["water_saved_by_waiting_for_rain_litres_per_acre"] * args.area_acres, -2)
     if crop.ponded:
         notes.append("Paddy: follow alternate wetting and drying (re-flood when water in a field tube falls 15 cm "
                      "below the surface); keep 5 cm standing water from flowering to grain filling.")
@@ -675,6 +683,40 @@ async def get_air_quality(ctx: ToolContext, args: LatLon) -> ToolOutput:
                      "(e.g. bio-decomposer, Happy Seeder) avoids burning.")
     return ToolOutput(data, [fetched.provenance("Copernicus CAMS air quality via Open-Meteo Air Quality API")], notes,
                       level, f"AQI {data['us_aqi_now']} ({data['category_now']})")
+
+
+# ===================================================================================== field diary
+async def get_field_diary(ctx: ToolContext, args: DiaryArgs, farm: Any | None) -> ToolOutput:
+    if farm is None:
+        raise ToolError("The field diary needs this conversation's farm profile.")
+    summary = diary_summary(ctx.db, farm, args.weeks)
+    data, rows = summary["data"], summary["rows"]
+    notes = ["Photo findings are AI visual estimates from the farmer's own photos, not a diagnosis: confirm in the field."]
+    if not rows:
+        notes.append("No check-ins yet: suggest the farmer adds a weekly crop photo in the Field diary tab.")
+        headline, level = "No check-ins yet: add this week's crop photo", "info"
+    else:
+        latest = rows[0]
+        findings = latest["analysis"] or {}
+        likely = [s for s in findings.get("symptoms", []) if s.get("likelihood") == "high"]
+        level = "moderate" if likely else "info"
+        parts = [f"Last check-in {nice_date(latest['created_at'])}"]
+        if findings.get("observed_stage") and findings["observed_stage"] != "unsure":
+            parts.append(f"{findings['observed_stage']}, about {findings.get('canopy_cover_pct')}% canopy")
+        if likely:
+            parts.append(f"possible {likely[0]['name']}")
+        if data.get("days_since_last_check_in", 0) >= 7:
+            parts.append("new photo due")
+        headline = "; ".join(parts)
+    source = {"name": "Farmer's field diary (photos and observations)", "url": "/api/diary",
+              "retrieved_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "cached": False, "stale": False}
+    chart = {"entries": [{"date": r["created_at"][:10], "photo_url": f"/api/diary/photo/{r['token']}" if r["has_photo"] else None,
+                          "status": r["analysis_status"], "summary": (r["analysis"] or {}).get("summary"),
+                          "stage": (r["analysis"] or {}).get("observed_stage"),
+                          "canopy": (r["analysis"] or {}).get("canopy_cover_pct"),
+                          "symptoms": (r["analysis"] or {}).get("symptoms", []), "observations": r["observations"]}
+                         for r in rows]}
+    return ToolOutput(data, [source], notes, level, headline, chart)
 
 
 # ===================================================================================== satellite

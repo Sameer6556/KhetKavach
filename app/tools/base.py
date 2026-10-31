@@ -63,6 +63,11 @@ class IrrigationArgs(CropArgs):
     irrigation_method: Literal["drip", "sprinkler", "furrow", "flood", "rainfed"] = Field(
         "flood", description="How the field is irrigated")
     last_irrigation_date: date | None = Field(None, description="Date of the last irrigation if known, YYYY-MM-DD")
+    area_acres: float | None = Field(None, gt=0, le=10000, description="Field size in acres, if known")
+
+
+class DiaryArgs(BaseModel):
+    weeks: int = Field(4, ge=1, le=12, description="How many recent weekly check-ins to return")
 
 
 class SprayArgs(LatLon):

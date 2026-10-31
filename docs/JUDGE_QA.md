@@ -56,6 +56,13 @@ changes the tools, the verifier or the UI.
 The LLM writes the answer in the farmer's language (11 options). The browser's Web Speech API does speech-to-text and text-to-speech
 with the matching locale (`hi-IN`, `ta-IN`, …). Units stay as symbols, which keeps verification language-agnostic.
 
+**Q: How do the weekly photos make the advice personal, and how do you avoid misdiagnosis?**
+Each check-in is analysed with last week's photo beside it into a fixed schema (`app/diary/models.py`): stage seen, canopy cover,
+leaf colour, water stress, weeds, and symptoms with a likelihood. The vision prompt forbids certain diagnoses, pesticide names and
+doses, and asks what to check in the field instead. The agent reads the diary through `get_field_diary`, cites it like any other
+evidence, and compares the stage seen with the stage expected from the sowing date. Photos are stripped of GPS metadata, and a
+check-in is saved even if the analysis fails.
+
 ## Science
 
 **Q: How is the irrigation advice computed?**

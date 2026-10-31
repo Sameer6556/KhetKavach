@@ -38,7 +38,9 @@ Forge Gen AI Buildathon · Theme 2: Climate, Resource Infrastructure & Global Su
 2. **Ask by voice** in Hindi, Marathi, Tamil and 8 more languages. An AI agent (Gemini or Claude) plans, calls tools in parallel and answers with
    evidence citations, and the answer is read aloud.
 3. **Every number is verified**: "✔ 9/9 figures traced to live sources".
-4. **Kavach Sentinel** watches registered farms 24×7 and pushes alerts to Telegram: *"Hold irrigation, 72 mm rain on Thursday; saves about
+4. **Weekly field diary:** one crop photo plus a few taps each week. The AI compares it with last week's photo (stage, canopy, possible
+   symptoms with likelihood), and every answer then fits what the farmer actually sees.
+5. **Kavach Sentinel** watches registered farms 24×7 and pushes alerts to Telegram: *"Hold irrigation, 72 mm rain on Thursday; saves about
    2 lakh litres/acre."*
 
 *Visual: dashboard screenshot + chat with the trace panel.*
@@ -96,7 +98,8 @@ Forge Gen AI Buildathon · Theme 2: Climate, Resource Infrastructure & Global Su
 1. Tap a farm → 12 live cards stream in.
 2. Ask in Hindi by voice → watch the agent plan, call 4 tools in parallel, cite and verify.
 3. Mandi question with a wrong commodity → the agent self-corrects from the tool's hint.
-4. Register a farm → Sentinel raises an alert → it arrives on Telegram.
+4. Snap a crop photo in the field diary → AI findings vs last week appear on the dashboard.
+5. Register a farm → Sentinel raises an alert → it arrives on Telegram.
 
 **Next 3 months:**
 

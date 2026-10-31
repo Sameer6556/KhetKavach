@@ -15,6 +15,7 @@ from datetime import date
 from typing import Any, Awaitable, Callable
 
 from ..config import Settings
+from ..diary.models import PhotoFindings
 from ..tools.registry import ToolRun
 from .fallback import rule_based_turn, tool_end_event
 from .prompts import farm_context_block
@@ -118,6 +119,10 @@ class BaseAgent:
 
     async def write_short(self, system: str, prompt: str) -> str | None:
         """One short, tool-free completion (used to word Sentinel alerts). None when unavailable."""
+        return None
+
+    async def analyze_photo(self, photos: list[bytes], prompt: str) -> PhotoFindings | None:
+        """Structured findings for one or two JPEG photos (previous week's first). None when unavailable."""
         return None
 
     async def aclose(self) -> None:

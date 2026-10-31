@@ -45,7 +45,8 @@ advise hundreds of farmers, and district disaster cells monitoring farms at risk
 | ✅ **Grounding verifier** | Before an answer is shown, every data figure (mm, °C, %, km/h, m³/s, ₹, L) is checked against the tool evidence. Anything untraceable sends the agent back to self-correct once. The UI shows "✔ 9/9 data figures verified against live sources". |
 | 🔁 **Live agent trace** | Judges and farmers can watch the reasoning summary, each tool call with its inputs, timing, sources and evidence ID, the verification step and any self-correction. |
 | 🛰️ **Satellite crop vigour** | Cloud-masked Sentinel-2 NDVI for a 150 m window around the field, its recent trend, and a comparison with the same period last year, read directly from Cloud-Optimised GeoTIFFs. |
-| 📣 **Kavach Sentinel (autonomous)** | Register a farm once. A background monitor re-analyses it every few hours, raises de-duplicated alerts (heavy rain, heat/cold waves, crop stress, irrigation due or hold, river flood, nearby disasters), writes them in the farmer's language and pushes them to **Telegram**. |
+| 📔 **Weekly field diary** | Each week the farmer sends one crop photo and taps a few answers (leaf colour, pests seen, irrigated/sprayed/fertilised dates, a note). The AI compares the photo with last week's and returns structured findings: growth stage seen vs expected, rough canopy cover, water stress, weeds, possible symptoms with a likelihood, and what to check in the field. The agent cites the diary as evidence, the reported irrigation date feeds the water balance, and the field size turns litres per acre into litres for the whole field. |
+| 📣 **Kavach Sentinel (autonomous)** | Register a farm once. A background monitor re-analyses it every few hours, raises de-duplicated alerts (weekly photo reminder, likely symptom in the latest photo, heavy rain, heat/cold waves, crop stress, irrigation due or hold, river flood, nearby disasters), writes them in the farmer's language and pushes them to **Telegram**. |
 | 🗣️ **Multilingual voice** | 11 languages (English, Hindi, Marathi, Bengali, Telugu, Tamil, Gujarati, Kannada, Malayalam, Punjabi, Odia) for answers. Speech in and out uses the browser's Web Speech API (no extra key). The UI itself is in English and Hindi. |
 | 🧯 **Never a blank screen** | If the AI is unreachable, rate-limited, slow or misconfigured, a rule-based advisor answers from the same live evidence. If one data source is down, only its card degrades. |
 
@@ -61,6 +62,8 @@ advise hundreds of farmers, and district disaster cells monitoring farms at risk
    (Sentinel) with outbound alerts.
 5. **Zero dummy data.** Every number comes from a live API or an official open dataset at request time. With the internet off, cards say
    "unavailable" or show the last good value clearly labelled *stale*. Nothing is ever invented.
+6. **Personal, not generic.** A weekly photo diary lets the AI see the actual field: what stage it is really at, whether leaves
+   are spotting, whether weeds are spreading. Advice changes with what the farmer sees, not just with the calendar.
 
 ## 4. Architecture
 
@@ -180,6 +183,9 @@ API-shaped responses used **only** by the offline test suite; the application ne
   * The rule-based advisor as the last line of defence.
 * **Input validation:** pydantic on every API request and every tool call. Invalid tool inputs go back to the model with the exact problems so
   it can correct itself.
+* **Photo privacy:** photos are shrunk in the browser, then re-encoded on the server without any metadata (no GPS).
+  They are served only by an unguessable per-entry link, and the farmer can delete any check-in. A failed or unavailable
+  photo analysis never blocks saving the farmer's own observations.
 * **Safety:**
   * A static system prompt; tool output is treated as data, not instructions.
   * No pesticide doses; the agent refers farmers to labels and the local KVK.
@@ -236,7 +242,7 @@ source or the agent fails.
 pytest -q
 ```
 
-78 offline tests cover the agronomy formulas (with published reference values), the verifier (incl. Devanagari digits), HTTP resilience
+91 offline tests cover the agronomy formulas (with published reference values), the verifier (incl. Devanagari digits), HTTP resilience
 (retry, circuit breaker, stale cache, coalescing), every tool end to end, real NDVI reads from GeoTIFFs, both agent loops, Claude and Gemini (parallel tools,
 self-correction, tool-error recovery, outage and rate-limit fallback, model fallback, compat retry) and the HTTP API including Sentinel alert de-duplication.
 
@@ -314,11 +320,12 @@ app/
 ├── tools/               13 agent/dashboard tools, registry (schemas, validation, execution)
 ├── agent/               shared agent core (base.py), Claude and Gemini loops, prompts, verifier, sessions,
 │                        provider factory, rule-based fallback
+├── diary/               field diary: photo intake (resize, EXIF/GPS strip), findings schema, check-in service
 ├── sentinel/            autonomous monitor + Telegram delivery
 ├── api/                 REST + SSE routes, dashboard streamer
 └── static/              single-page app (vanilla JS modules, vendored Leaflet + Chart.js)
 scripts/smoke_test.py    live end-to-end integration check
-tests/                   78 offline tests (fakes.py = test-only API stand-ins)
+tests/                   91 offline tests (fakes.py = test-only API stand-ins)
 docs/                    architecture, pitch deck, demo script, submission text, judge Q&A
 ```
 
@@ -334,6 +341,9 @@ docs/                    architecture, pitch deck, demo script, submission text,
 | GET/POST/DELETE | `/api/farms` | Sentinel farm registry |
 | POST | `/api/sentinel/scan[?farm_id=]` | Run the monitor now |
 | GET | `/api/alerts` | Alert feed |
+| POST | `/api/diary` | Weekly check-in: multipart `farm` (JSON), `observations` (JSON), optional `photo` |
+| GET | `/api/diary?lat=&lon=&crop=&sowing_date=` | Check-ins for a field, newest first, with the next due date |
+| GET/DELETE | `/api/diary/photo/{token}` · `/api/diary/{token}` | Photo by unguessable token · delete a check-in |
 
 Interactive docs: `/docs` (OpenAPI).
 

@@ -47,7 +47,7 @@ class SessionStore:
             return sess
         ledger = EvidenceLedger()
         sess = ChatSession(id=secrets.token_urlsafe(12), farm=farm, ledger=ledger,
-                           executor=ToolExecutor(self._ctx, ledger, farm.lat, farm.lon))
+                           executor=ToolExecutor(self._ctx, ledger, farm=farm))
         self._items[sess.id] = sess
         return sess
 

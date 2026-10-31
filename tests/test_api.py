@@ -48,7 +48,7 @@ def test_dashboard_streams_every_section(client):
     assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/event-stream")
     evs = events(resp)
     sections = [e for e in evs if e["type"] == "section"]
-    assert len(sections) == 12
+    assert len(sections) == 13
     failed = [s["tool"] for s in sections if not s["ok"]]
     assert failed == [], failed
     summary = evs[-1]

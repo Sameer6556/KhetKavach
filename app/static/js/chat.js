@@ -75,7 +75,7 @@ export function initChat(getContext) {
 
 export function renderSuggestions(onPick) {
   const box = document.getElementById('suggestions');
-  box.innerHTML = ['q1', 'q2', 'q3', 'q4', 'q5', 'q6'].map((k) => `<button type="button" data-q="${k}">${esc(t(k))}</button>`).join('');
+  box.innerHTML = ['q1', 'q7', 'q2', 'q3', 'q4', 'q5', 'q6'].map((k) => `<button type="button" data-q="${k}">${esc(t(k))}</button>`).join('');
   box.onclick = (e) => { const b = e.target.closest('button'); if (b) onPick(t(b.dataset.q)); };
 }
 

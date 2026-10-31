@@ -59,6 +59,9 @@
         <label><span data-i18n="last_irrigation">Last irrigated (optional)</span>
           <input id="last-irrigation" type="date">
         </label>
+        <label><span data-i18n="field_size">Field size in acres (optional)</span>
+          <input id="area" type="number" min="0.1" max="10000" step="0.1" inputmode="decimal" placeholder="e.g. 2.5">
+        </label>
         <button id="analyse-btn" type="submit" class="btn btn-primary btn-block" data-i18n="analyse">Analyse my farm</button>
         <p id="form-error" class="form-error" role="alert" hidden></p>
       </form>
@@ -67,6 +70,7 @@
     <section class="workspace">
       <nav class="tabs" role="tablist">
         <button role="tab" class="tab active" data-tab="dashboard" aria-selected="true" data-i18n="tab_dashboard">Risk dashboard</button>
+        <button role="tab" class="tab" data-tab="diary" aria-selected="false" data-i18n="tab_diary">Field diary</button>
         <button role="tab" class="tab" data-tab="chat" aria-selected="false" data-i18n="tab_chat">Ask the AI agronomist</button>
         <button role="tab" class="tab" data-tab="sentinel" aria-selected="false" data-i18n="tab_sentinel">Sentinel alerts</button>
       </nav>
@@ -78,6 +82,50 @@
         </div>
         <div id="dash-summary" class="summary-banner" hidden></div>
         <div id="dash-grid" class="card-grid" hidden></div>
+      </div>
+
+      <div class="tab-panel" id="panel-diary" role="tabpanel" hidden>
+        <div class="diary-layout">
+          <form id="diary-form" class="diary-form">
+            <h3 data-i18n="diary_title">Weekly check-in</h3>
+            <p class="muted" data-i18n="diary_body">One photo of your crop each week and a few taps. The AI compares it with last week and uses it to tailor every answer.</p>
+            <p id="diary-due" class="diary-due" hidden></p>
+            <label class="photo-pick">
+              <input id="diary-photo" type="file" accept="image/*" capture="environment" class="sr-only">
+              <span class="photo-drop">
+                <img id="photo-preview" alt="Selected crop photo" hidden>
+                <span id="photo-hint" data-i18n="photo_hint">📷 Take or choose a crop photo (stand 1–2 m away, in daylight)</span>
+              </span>
+            </label>
+            <fieldset class="chips-q">
+              <legend data-i18n="q_leaf">Leaf colour</legend>
+              <label class="chip-opt"><input type="radio" name="leaf" value="green"><span data-i18n="leaf_green">Green</span></label>
+              <label class="chip-opt"><input type="radio" name="leaf" value="yellowing"><span data-i18n="leaf_yellowing">Yellowing</span></label>
+              <label class="chip-opt"><input type="radio" name="leaf" value="brown_spots"><span data-i18n="leaf_brown">Brown spots</span></label>
+              <label class="chip-opt"><input type="radio" name="leaf" value="mixed"><span data-i18n="leaf_mixed">Mixed</span></label>
+            </fieldset>
+            <fieldset class="chips-q">
+              <legend data-i18n="q_pests">Pests seen</legend>
+              <label class="chip-opt"><input type="radio" name="pests" value="none"><span data-i18n="pests_none">None</span></label>
+              <label class="chip-opt"><input type="radio" name="pests" value="few"><span data-i18n="pests_few">A few</span></label>
+              <label class="chip-opt"><input type="radio" name="pests" value="many"><span data-i18n="pests_many">Many</span></label>
+            </fieldset>
+            <div class="date-row">
+              <label><span data-i18n="q_irrigated">Irrigated on</span><input id="obs-irrigated" type="date"></label>
+              <label><span data-i18n="q_sprayed">Sprayed on</span><input id="obs-sprayed" type="date"></label>
+              <label><span data-i18n="q_fertilised">Fertiliser on</span><input id="obs-fertilised" type="date"></label>
+            </div>
+            <label><span data-i18n="q_note">Anything else you noticed?</span>
+              <textarea id="obs-note" rows="2" maxlength="500"></textarea>
+            </label>
+            <button id="diary-submit" class="btn btn-primary btn-block" type="submit" data-i18n="diary_submit">Save check-in</button>
+            <p id="diary-msg" class="small" role="status"></p>
+          </form>
+          <div class="diary-col">
+            <h3 data-i18n="diary_history">Your field diary</h3>
+            <ol id="diary-list" class="diary-list"></ol>
+          </div>
+        </div>
       </div>
 
       <div class="tab-panel" id="panel-chat" role="tabpanel" hidden>
